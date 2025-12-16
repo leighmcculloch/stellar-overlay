@@ -15,7 +15,7 @@ mod framing;
 mod handshake;
 mod session;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::io::{self, Read};
 use std::time::Duration;
 use stellar_xdr::curr::{ReadXdr, StellarMessage, TransactionEnvelope};
@@ -44,7 +44,14 @@ async fn main() -> Result<()> {
 
     let input = input.trim();
     if input.is_empty() {
-        bail!("No transaction provided on stdin");
+        eprintln!("txsub - Submit transactions to the Stellar overlay network");
+        eprintln!();
+        eprintln!("Usage: echo <BASE64_TX> | txsub");
+        eprintln!();
+        eprintln!("Reads a base64-encoded transaction envelope from stdin,");
+        eprintln!("connects to the Stellar Testnet, and submits it via the");
+        eprintln!("peer-to-peer overlay protocol.");
+        std::process::exit(1);
     }
 
     // Decode base64
