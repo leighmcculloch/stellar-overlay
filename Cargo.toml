@@ -1,0 +1,20 @@
+[package]
+name = "txsub"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+stellar-xdr = { version = "25", features = ["std", "curr"] }
+tokio = { version = "1", features = ["full"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+sha2 = "0.10"
+hmac = "0.12"
+hkdf = "0.12"
+rand = "0.8"
+base64 = "0.22"
+anyhow = "1"
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
