@@ -1,4 +1,4 @@
-# txsub
+# stellar-txsub-cli
 
 Submit transactions to the Stellar network via the peer-to-peer overlay protocol.
 
