@@ -57,45 +57,41 @@ async fn main() -> Result<()> {
             .context("Failed to parse transaction envelope")?;
 
     // Connect to peer
-    eprintln!("Connecting to {}...", DEFAULT_PEER);
+    eprintln!("ℹ️  Connecting to {}", DEFAULT_PEER);
     let stream = TcpStream::connect(DEFAULT_PEER)
         .await
         .context("Failed to connect to peer")?;
+    eprintln!("✅ Connected");
 
     // Compute network ID
     let net_id = network_id(TESTNET_PASSPHRASE);
 
     // Perform handshake
-    eprintln!("Performing handshake...");
+    eprintln!("ℹ️  Performing handshake");
     let mut session = handshake(stream, net_id, LOCAL_LISTENING_PORT).await?;
-
-    eprintln!("Authenticated successfully");
+    eprintln!("✅ Authenticated");
 
     // Send transaction
-    eprintln!("Sending transaction...");
     let tx_msg = StellarMessage::Transaction(tx_envelope);
+    log_outgoing(&tx_msg);
     session.send_message(tx_msg).await?;
-
-    eprintln!("Transaction sent, waiting for response...");
 
     // Wait for responses with timeout
     loop {
         match timeout(RESPONSE_TIMEOUT, session.recv()).await {
             Ok(Ok(msg)) => {
-                print_message(&msg);
+                log_incoming(&msg);
                 // If we got an error, exit with failure
                 if matches!(msg, StellarMessage::ErrorMsg(_)) {
                     std::process::exit(1);
                 }
             }
             Ok(Err(e)) => {
-                // Connection error or EOF
-                eprintln!("Connection closed: {}", e);
+                eprintln!("❌ Connection closed: {}", e);
                 break;
             }
             Err(_) => {
-                // Timeout - no more messages
-                eprintln!("No further responses (timeout)");
+                eprintln!("ℹ️  Done (timeout)");
                 break;
             }
         }
@@ -104,83 +100,84 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Print a StellarMessage in human-readable format.
-fn print_message(msg: &StellarMessage) {
+/// Log an outgoing message.
+fn log_outgoing(msg: &StellarMessage) {
+    eprintln!("→ {}", format_message(msg));
+}
+
+/// Log an incoming message.
+fn log_incoming(msg: &StellarMessage) {
+    let prefix = if matches!(msg, StellarMessage::ErrorMsg(_)) {
+        "❌"
+    } else {
+        "←"
+    };
+    eprintln!("{} {}", prefix, format_message(msg));
+}
+
+/// Format a StellarMessage for display.
+fn format_message(msg: &StellarMessage) -> String {
     match msg {
         StellarMessage::ErrorMsg(e) => {
-            eprintln!(
-                "ERROR: {:?} - {}",
+            format!(
+                "ERROR_MSG: {:?} - {}",
                 e.code,
                 String::from_utf8_lossy(&e.msg.to_vec())
-            );
+            )
         }
         StellarMessage::Hello(h) => {
-            eprintln!(
-                "HELLO: version={}, overlay={}, peer={}",
+            format!(
+                "HELLO: ledger_version={}, overlay_version={}, version_str={}",
                 h.ledger_version,
                 h.overlay_version,
                 String::from_utf8_lossy(&h.version_str.to_vec())
-            );
+            )
         }
         StellarMessage::Auth(a) => {
-            eprintln!("AUTH: flags={}", a.flags);
+            format!("AUTH: flags={}", a.flags)
         }
         StellarMessage::SendMore(s) => {
-            eprintln!("SEND_MORE: num_messages={}", s.num_messages);
+            format!("SEND_MORE: num_messages={}", s.num_messages)
         }
         StellarMessage::SendMoreExtended(s) => {
-            eprintln!(
+            format!(
                 "SEND_MORE_EXTENDED: num_messages={}, num_bytes={}",
                 s.num_messages, s.num_bytes
-            );
+            )
         }
-        StellarMessage::Transaction(tx) => {
-            eprintln!("TRANSACTION: {:?}", tx);
-        }
+        StellarMessage::Transaction(_) => "TRANSACTION".to_string(),
         StellarMessage::DontHave(dh) => {
-            eprintln!("DONT_HAVE: type={:?}, hash={:?}", dh.type_, dh.req_hash);
+            format!("DONT_HAVE: type={:?}", dh.type_)
         }
         StellarMessage::Peers(peers) => {
-            eprintln!("PEERS: count={}", peers.len());
+            format!("PEERS: count={}", peers.len())
         }
-        StellarMessage::GetTxSet(hash) => {
-            eprintln!("GET_TX_SET: hash={:?}", hash);
-        }
-        StellarMessage::TxSet(set) => {
-            eprintln!("TX_SET: previous_ledger={:?}", set.previous_ledger_hash);
-        }
-        StellarMessage::GeneralizedTxSet(set) => {
-            eprintln!("GENERALIZED_TX_SET: {:?}", set);
-        }
-        StellarMessage::GetScpQuorumset(hash) => {
-            eprintln!("GET_SCP_QUORUMSET: hash={:?}", hash);
-        }
+        StellarMessage::GetTxSet(_) => "GET_TX_SET".to_string(),
+        StellarMessage::TxSet(_) => "TX_SET".to_string(),
+        StellarMessage::GeneralizedTxSet(_) => "GENERALIZED_TX_SET".to_string(),
+        StellarMessage::GetScpQuorumset(_) => "GET_SCP_QUORUMSET".to_string(),
         StellarMessage::ScpQuorumset(qs) => {
-            eprintln!("SCP_QUORUMSET: threshold={}", qs.threshold);
+            format!("SCP_QUORUMSET: threshold={}", qs.threshold)
         }
         StellarMessage::ScpMessage(scp) => {
-            eprintln!("SCP_MESSAGE: slot={}", scp.statement.slot_index);
+            format!("SCP_MESSAGE: slot={}", scp.statement.slot_index)
         }
         StellarMessage::GetScpState(ledger) => {
-            eprintln!("GET_SCP_STATE: ledger={}", ledger);
+            format!("GET_SCP_STATE: ledger={}", ledger)
         }
         StellarMessage::FloodAdvert(advert) => {
-            eprintln!("FLOOD_ADVERT: tx_hashes count={}", advert.tx_hashes.len());
+            format!("FLOOD_ADVERT: tx_hashes={}", advert.tx_hashes.len())
         }
         StellarMessage::FloodDemand(demand) => {
-            eprintln!("FLOOD_DEMAND: tx_hashes count={}", demand.tx_hashes.len());
+            format!("FLOOD_DEMAND: tx_hashes={}", demand.tx_hashes.len())
         }
-        StellarMessage::TimeSlicedSurveyRequest(_) => {
-            eprintln!("TIME_SLICED_SURVEY_REQUEST");
-        }
-        StellarMessage::TimeSlicedSurveyResponse(_) => {
-            eprintln!("TIME_SLICED_SURVEY_RESPONSE");
-        }
+        StellarMessage::TimeSlicedSurveyRequest(_) => "TIME_SLICED_SURVEY_REQUEST".to_string(),
+        StellarMessage::TimeSlicedSurveyResponse(_) => "TIME_SLICED_SURVEY_RESPONSE".to_string(),
         StellarMessage::TimeSlicedSurveyStartCollecting(_) => {
-            eprintln!("TIME_SLICED_SURVEY_START_COLLECTING");
+            "TIME_SLICED_SURVEY_START_COLLECTING".to_string()
         }
         StellarMessage::TimeSlicedSurveyStopCollecting(_) => {
-            eprintln!("TIME_SLICED_SURVEY_STOP_COLLECTING");
+            "TIME_SLICED_SURVEY_STOP_COLLECTING".to_string()
         }
     }
 }

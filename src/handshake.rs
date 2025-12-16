@@ -63,14 +63,35 @@ pub async fn handshake(
 
     // Send HELLO
     let hello_msg = StellarMessage::Hello(hello);
+    eprintln!(
+        "→ HELLO: ledger_version={}, overlay_version={}, version_str=txsub/0.1.0",
+        22, OVERLAY_PROTOCOL_VERSION
+    );
     send_unauthenticated(&mut stream, hello_msg).await?;
 
     // Receive HELLO from peer
     let peer_hello = recv_unauthenticated(&mut stream).await?;
     let peer_hello = match peer_hello {
-        StellarMessage::Hello(h) => h,
+        StellarMessage::Hello(h) => {
+            eprintln!(
+                "← HELLO: ledger_version={}, overlay_version={}, version_str={}",
+                h.ledger_version,
+                h.overlay_version,
+                String::from_utf8_lossy(&h.version_str.to_vec())
+            );
+            h
+        }
         StellarMessage::ErrorMsg(e) => {
-            bail!("Peer sent ERROR: {:?} - {}", e.code, String::from_utf8_lossy(&e.msg.to_vec()));
+            eprintln!(
+                "❌ ERROR_MSG: {:?} - {}",
+                e.code,
+                String::from_utf8_lossy(&e.msg.to_vec())
+            );
+            bail!(
+                "Peer sent ERROR: {:?} - {}",
+                e.code,
+                String::from_utf8_lossy(&e.msg.to_vec())
+            );
         }
         other => {
             bail!("Expected HELLO, got {:?}", other);
@@ -112,34 +133,66 @@ pub async fn handshake(
         flags: AUTH_MSG_FLAG_FLOW_CONTROL_BYTES_REQUESTED,
     };
     let auth_msg = StellarMessage::Auth(auth);
+    eprintln!("→ AUTH: flags={}", AUTH_MSG_FLAG_FLOW_CONTROL_BYTES_REQUESTED);
     session.send_message(auth_msg).await?;
 
     // Receive response (could be AUTH, SEND_MORE_EXTENDED, or ERROR)
     let response = session.recv().await?;
     match response {
-        StellarMessage::Auth(_) => {
-            // Authentication successful
+        StellarMessage::Auth(a) => {
+            eprintln!("← AUTH: flags={}", a.flags);
             Ok(session)
         }
-        StellarMessage::SendMoreExtended(_) => {
+        StellarMessage::SendMoreExtended(s) => {
+            eprintln!(
+                "← SEND_MORE_EXTENDED: num_messages={}, num_bytes={}",
+                s.num_messages, s.num_bytes
+            );
             // Peer sent SEND_MORE_EXTENDED before AUTH, which is valid
             // Wait for AUTH
             let auth_response = session.recv().await?;
             match auth_response {
-                StellarMessage::Auth(_) => Ok(session),
+                StellarMessage::Auth(a) => {
+                    eprintln!("← AUTH: flags={}", a.flags);
+                    Ok(session)
+                }
                 StellarMessage::ErrorMsg(e) => {
-                    bail!("Auth failed: {:?} - {}", e.code, String::from_utf8_lossy(&e.msg.to_vec()));
+                    eprintln!(
+                        "❌ ERROR_MSG: {:?} - {}",
+                        e.code,
+                        String::from_utf8_lossy(&e.msg.to_vec())
+                    );
+                    bail!(
+                        "Auth failed: {:?} - {}",
+                        e.code,
+                        String::from_utf8_lossy(&e.msg.to_vec())
+                    );
                 }
                 other => {
-                    bail!("Expected AUTH after SEND_MORE_EXTENDED, got {:?}", message_type(&other));
+                    bail!(
+                        "Expected AUTH after SEND_MORE_EXTENDED, got {:?}",
+                        message_type(&other)
+                    );
                 }
             }
         }
         StellarMessage::ErrorMsg(e) => {
-            bail!("Auth failed: {:?} - {}", e.code, String::from_utf8_lossy(&e.msg.to_vec()));
+            eprintln!(
+                "❌ ERROR_MSG: {:?} - {}",
+                e.code,
+                String::from_utf8_lossy(&e.msg.to_vec())
+            );
+            bail!(
+                "Auth failed: {:?} - {}",
+                e.code,
+                String::from_utf8_lossy(&e.msg.to_vec())
+            );
         }
         other => {
-            bail!("Expected AUTH or SEND_MORE_EXTENDED, got {:?}", message_type(&other));
+            bail!(
+                "Expected AUTH or SEND_MORE_EXTENDED, got {:?}",
+                message_type(&other)
+            );
         }
     }
 }
