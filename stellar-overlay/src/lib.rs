@@ -8,5 +8,5 @@ pub mod framing;
 pub mod handshake;
 pub mod session;
 
-pub use handshake::handshake;
+pub use handshake::{handshake, Event};
 pub use session::PeerSession;

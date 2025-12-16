@@ -10,7 +10,7 @@ use clap::Parser;
 use network::Network;
 use std::io::{self, IsTerminal, Read};
 use std::time::Duration;
-use stellar_overlay::handshake;
+use stellar_overlay::{handshake, Event};
 use stellar_xdr::curr::{ReadXdr, StellarMessage, TransactionEnvelope};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
     // Perform handshake
     eprintln!("ℹ️ Performing handshake");
     let net_id = network.id();
-    let mut session = handshake(stream, net_id.clone(), LOCAL_LISTENING_PORT).await?;
+    let mut session = handshake(stream, net_id.clone(), LOCAL_LISTENING_PORT, log_event).await?;
     eprintln!("✅ Authenticated");
 
     // Send transaction
@@ -117,6 +117,15 @@ async fn main() -> Result<()> {
     eprintln!("⚠️ Use the hash to check the status with a block explorer.");
 
     Ok(())
+}
+
+/// Log a handshake event.
+fn log_event(event: Event) {
+    match event {
+        Event::Sending(msg) => eprintln!("➡️ {}", msg),
+        Event::Received(msg) => eprintln!("⬅️ {}", msg),
+        Event::Error(msg) => eprintln!("❌ {}", msg),
+    }
 }
 
 /// Log an incoming message.
