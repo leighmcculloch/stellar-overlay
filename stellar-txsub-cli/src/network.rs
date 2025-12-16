@@ -1,6 +1,6 @@
 //! Stellar network configuration.
 
-use stellar_overlay::crypto::network_id;
+use stellar_overlay::network_id;
 use stellar_xdr::curr::Hash;
 
 /// Stellar network configuration.

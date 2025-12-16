@@ -1,9 +1,4 @@
 //! Peer handshake implementation for the Stellar overlay protocol.
-//!
-//! The handshake consists of:
-//! 1. Exchange HELLO messages
-//! 2. Derive MAC keys from ECDH
-//! 3. Exchange AUTH messages
 
 use crate::crypto::{
     create_auth_cert, derive_receiving_mac_key, derive_sending_mac_key, ecdh_shared_secret,
@@ -32,24 +27,42 @@ const AUTH_CERT_EXPIRATION_SECONDS: u64 = 3600;
 /// Version string for HELLO message.
 const VERSION_STR: &str = concat!("stellar-overlay ", env!("CARGO_PKG_VERSION"));
 
-/// Errors that can occur during the handshake process.
+/// Errors that can occur during handshake or session operations.
+///
+/// This error type covers failures during the initial handshake as well as
+/// errors that occur when sending or receiving messages on an established session.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Error during session operations.
+    /// Error during session operations (sending/receiving messages).
     #[error(transparent)]
     Session(#[from] crate::session::Error),
 
     /// Peer sent an error message.
     #[error("peer sent error: {code:?} - {message}")]
-    PeerError { code: ErrorCode, message: String },
+    PeerError {
+        /// The error code from the peer.
+        code: ErrorCode,
+        /// The error message from the peer.
+        message: String,
+    },
 
     /// Received unexpected message type.
     #[error("expected {expected}, got {got}")]
-    UnexpectedMessage { expected: &'static str, got: String },
+    UnexpectedMessage {
+        /// The expected message type.
+        expected: &'static str,
+        /// The actual message type received.
+        got: String,
+    },
 
     /// Peer's overlay protocol version is too old.
     #[error("peer overlay version {version} is too old (min: {min})")]
-    OverlayVersionTooOld { version: u32, min: u32 },
+    OverlayVersionTooOld {
+        /// The peer's overlay version.
+        version: u32,
+        /// The minimum supported version.
+        min: u32,
+    },
 
     /// Network ID does not match expected value.
     #[error("network ID mismatch")]
@@ -60,25 +73,88 @@ pub enum Error {
     SystemTime,
 }
 
-/// Events emitted during the handshake process.
+/// Log entries emitted during the handshake process.
+///
+/// Pass a callback to [`handshake`] to receive these log entries for
+/// debugging or status reporting.
+///
+/// # Example
+///
+/// ```no_run
+/// use stellar_overlay::{handshake, Log, network_id};
+/// use tokio::net::TcpStream;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let stream = TcpStream::connect("core-testnet1.stellar.org:11625").await?;
+/// let network = network_id("Test SDF Network ; September 2015");
+///
+/// let session = handshake(stream, network, 11625, |log| {
+///     match log {
+///         Log::Sending(msg) => println!("-> {}", msg),
+///         Log::Received(msg) => println!("<- {}", msg),
+///         Log::Error(msg) => eprintln!("Error: {}", msg),
+///     }
+/// }).await?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone)]
-pub enum Event {
-    /// A message is being sent to the peer.
+pub enum Log {
+    /// A protocol message is being sent to the peer.
     Sending(String),
-    /// A message was received from the peer.
+    /// A protocol message was received from the peer.
     Received(String),
     /// An error message was received from the peer.
     Error(String),
 }
 
-/// Perform the peer handshake and return an authenticated session.
+/// Perform an authenticated handshake with a Stellar Core peer.
 ///
-/// The `log` callback is invoked with events during the handshake process.
+/// This function performs the Stellar overlay protocol handshake:
+/// 1. Exchange HELLO messages to negotiate protocol versions
+/// 2. Derive shared MAC keys using ECDH key exchange
+/// 3. Exchange AUTH messages to complete authentication
+///
+/// On success, returns a [`PeerSession`] that can be used to send and receive
+/// protocol messages.
+///
+/// # Arguments
+///
+/// * `stream` - A TCP connection to a Stellar Core node
+/// * `network_id` - The network ID (hash of network passphrase). Use [`network_id`](crate::network_id) to compute this.
+/// * `listening_port` - The port to advertise in the HELLO message (typically 11625)
+/// * `log` - Callback invoked with log entries during the handshake
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The peer sends an error message
+/// - The peer's protocol version is incompatible
+/// - The network ID doesn't match
+/// - A network or protocol error occurs
+///
+/// # Example
+///
+/// ```no_run
+/// use stellar_overlay::{handshake, Log, network_id, PeerSession};
+/// use tokio::net::TcpStream;
+///
+/// async fn connect_to_testnet() -> Result<PeerSession, Box<dyn std::error::Error>> {
+///     let stream = TcpStream::connect("core-testnet1.stellar.org:11625").await?;
+///     let network = network_id("Test SDF Network ; September 2015");
+///
+///     let session = handshake(stream, network, 11625, |log| {
+///         println!("{:?}", log);
+///     }).await?;
+///
+///     Ok(session)
+/// }
+/// ```
 pub async fn handshake(
     mut stream: TcpStream,
     network_id: Hash,
     listening_port: i32,
-    mut log: impl FnMut(Event),
+    mut log: impl FnMut(Log),
 ) -> Result<PeerSession, Error> {
     // Generate crypto material
     let node_identity = NodeIdentity::generate();
@@ -110,7 +186,7 @@ pub async fn handshake(
 
     // Send HELLO
     let hello_msg = StellarMessage::Hello(hello);
-    log(Event::Sending(format!(
+    log(Log::Sending(format!(
         "Hello: ledger_version={}, overlay_version={}, version_str={}",
         LEDGER_PROTOCOL_VERSION, OVERLAY_PROTOCOL_VERSION, VERSION_STR
     )));
@@ -124,7 +200,7 @@ pub async fn handshake(
         .map_err(Error::Session)?;
     let peer_hello = match peer_hello {
         StellarMessage::Hello(h) => {
-            log(Event::Received(format!(
+            log(Log::Received(format!(
                 "Hello: ledger_version={}, overlay_version={}, version_str={}",
                 h.ledger_version,
                 h.overlay_version,
@@ -134,7 +210,7 @@ pub async fn handshake(
         }
         StellarMessage::ErrorMsg(e) => {
             let message = String::from_utf8_lossy(&e.msg.to_vec()).to_string();
-            log(Event::Error(format!("ErrorMsg: {:?} - {}", e.code, message)));
+            log(Log::Error(format!("ErrorMsg: {:?} - {}", e.code, message)));
             return Err(Error::PeerError {
                 code: e.code,
                 message,
@@ -182,7 +258,7 @@ pub async fn handshake(
         flags: AUTH_MSG_FLAG_FLOW_CONTROL_BYTES_REQUESTED,
     };
     let auth_msg = StellarMessage::Auth(auth);
-    log(Event::Sending(format!(
+    log(Log::Sending(format!(
         "Auth: flags={}",
         AUTH_MSG_FLAG_FLOW_CONTROL_BYTES_REQUESTED
     )));
@@ -192,11 +268,11 @@ pub async fn handshake(
     let response = session.recv().await.map_err(Error::Session)?;
     match response {
         StellarMessage::Auth(a) => {
-            log(Event::Received(format!("Auth: flags={}", a.flags)));
+            log(Log::Received(format!("Auth: flags={}", a.flags)));
             Ok(session)
         }
         StellarMessage::SendMoreExtended(s) => {
-            log(Event::Received(format!(
+            log(Log::Received(format!(
                 "SendMoreExtended: num_messages={}, num_bytes={}",
                 s.num_messages, s.num_bytes
             )));
@@ -205,12 +281,12 @@ pub async fn handshake(
             let auth_response = session.recv().await.map_err(Error::Session)?;
             match auth_response {
                 StellarMessage::Auth(a) => {
-                    log(Event::Received(format!("Auth: flags={}", a.flags)));
+                    log(Log::Received(format!("Auth: flags={}", a.flags)));
                     Ok(session)
                 }
                 StellarMessage::ErrorMsg(e) => {
                     let message = String::from_utf8_lossy(&e.msg.to_vec()).to_string();
-                    log(Event::Error(format!("ErrorMsg: {:?} - {}", e.code, message)));
+                    log(Log::Error(format!("ErrorMsg: {:?} - {}", e.code, message)));
                     Err(Error::PeerError {
                         code: e.code,
                         message,
@@ -224,7 +300,7 @@ pub async fn handshake(
         }
         StellarMessage::ErrorMsg(e) => {
             let message = String::from_utf8_lossy(&e.msg.to_vec()).to_string();
-            log(Event::Error(format!("ErrorMsg: {:?} - {}", e.code, message)));
+            log(Log::Error(format!("ErrorMsg: {:?} - {}", e.code, message)));
             Err(Error::PeerError {
                 code: e.code,
                 message,

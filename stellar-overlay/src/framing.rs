@@ -52,7 +52,7 @@ pub enum Error {
 /// Read a framed message from the stream.
 ///
 /// Returns the deserialized AuthenticatedMessage.
-pub async fn read_message(
+pub(crate) async fn read_message(
     stream: &mut TcpStream,
     authenticated: bool,
 ) -> Result<AuthenticatedMessage, Error> {
@@ -97,7 +97,7 @@ pub async fn read_message(
 /// Write a framed message to the stream.
 ///
 /// Serializes the message to XDR and prepends a 4-byte length header.
-pub async fn write_message(stream: &mut TcpStream, msg: &AuthenticatedMessage) -> Result<(), Error> {
+pub(crate) async fn write_message(stream: &mut TcpStream, msg: &AuthenticatedMessage) -> Result<(), Error> {
     // Serialize to XDR
     let body = msg
         .to_xdr(stellar_xdr::curr::Limits::none())

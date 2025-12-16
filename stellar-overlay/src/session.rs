@@ -1,9 +1,4 @@
 //! Peer session state management.
-//!
-//! This module provides the PeerSession struct that tracks:
-//! - MAC keys for message authentication
-//! - Sequence numbers for replay protection
-//! - Connection state
 
 use crate::crypto::hmac_sha256;
 use crate::framing::{read_message, write_message};
@@ -29,23 +24,39 @@ pub enum Error {
     MacVerificationFailed,
 }
 
-/// A session with an authenticated peer.
+/// An authenticated session with a Stellar Core peer.
+///
+/// After a successful [`handshake`](crate::handshake), you receive a `PeerSession`
+/// that can be used to send and receive protocol messages.
+///
+/// # Example
+///
+/// ```no_run
+/// use stellar_overlay::PeerSession;
+/// use stellar_xdr::curr::StellarMessage;
+///
+/// async fn communicate(session: &mut PeerSession) -> Result<(), stellar_overlay::Error> {
+///     // Receive a message from the peer
+///     let msg = session.recv().await?;
+///     println!("Received: {:?}", msg);
+///
+///     // Send a message to the peer (e.g., a transaction)
+///     // session.send_message(StellarMessage::Transaction(tx)).await?;
+///
+///     Ok(())
+/// }
+/// ```
 pub struct PeerSession {
-    /// The TCP connection to the peer.
-    pub stream: TcpStream,
-    /// MAC key for outgoing messages.
-    pub send_mac_key: HmacSha256Key,
-    /// MAC key for incoming messages.
-    pub recv_mac_key: HmacSha256Key,
-    /// Sequence number for outgoing messages.
-    pub send_sequence: u64,
-    /// Expected sequence number for incoming messages.
-    pub recv_sequence: u64,
+    stream: TcpStream,
+    send_mac_key: HmacSha256Key,
+    recv_mac_key: HmacSha256Key,
+    send_sequence: u64,
+    recv_sequence: u64,
 }
 
 impl PeerSession {
     /// Create a new peer session with the given MAC keys.
-    pub fn new(
+    pub(crate) fn new(
         stream: TcpStream,
         send_mac_key: HmacSha256Key,
         recv_mac_key: HmacSha256Key,
@@ -85,13 +96,51 @@ impl PeerSession {
             .map_err(Error::Framing)
     }
 
-    /// Send a StellarMessage (automatically wrapping it in AuthenticatedMessage).
+    /// Send a message to the peer.
+    ///
+    /// The message is automatically wrapped in an authenticated envelope with
+    /// the proper sequence number and MAC.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - The Stellar protocol message to send
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use stellar_overlay::PeerSession;
+    /// use stellar_xdr::curr::{StellarMessage, TransactionEnvelope};
+    ///
+    /// async fn send_tx(session: &mut PeerSession, tx: TransactionEnvelope) -> Result<(), Box<dyn std::error::Error>> {
+    ///     session.send_message(StellarMessage::Transaction(tx)).await?;
+    ///     Ok(())
+    /// }
+    /// ```
     pub async fn send_message(&mut self, msg: StellarMessage) -> Result<(), Error> {
         let auth_msg = self.wrap_authenticated(msg);
         self.send(auth_msg).await
     }
 
-    /// Receive and verify an authenticated message from the peer.
+    /// Receive a message from the peer.
+    ///
+    /// Waits for the next message from the peer, verifies its sequence number
+    /// and MAC, and returns the unwrapped message.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use stellar_overlay::PeerSession;
+    /// use stellar_xdr::curr::StellarMessage;
+    /// use std::time::Duration;
+    /// use tokio::time::timeout;
+    ///
+    /// async fn recv_with_timeout(session: &mut PeerSession) -> Option<StellarMessage> {
+    ///     match timeout(Duration::from_secs(5), session.recv()).await {
+    ///         Ok(Ok(msg)) => Some(msg),
+    ///         _ => None,
+    ///     }
+    /// }
+    /// ```
     pub async fn recv(&mut self) -> Result<StellarMessage, Error> {
         let auth_msg = read_message(&mut self.stream, true)
             .await
@@ -136,7 +185,7 @@ impl PeerSession {
 ///
 /// These messages are sent before authentication is complete,
 /// so they use sequence 0 and a zero MAC.
-pub async fn send_unauthenticated(stream: &mut TcpStream, msg: StellarMessage) -> Result<(), Error> {
+pub(crate) async fn send_unauthenticated(stream: &mut TcpStream, msg: StellarMessage) -> Result<(), Error> {
     let auth_msg = AuthenticatedMessage::V0(AuthenticatedMessageV0 {
         sequence: 0,
         message: msg,
@@ -151,7 +200,7 @@ pub async fn send_unauthenticated(stream: &mut TcpStream, msg: StellarMessage) -
 ///
 /// These messages are received before authentication is complete,
 /// so we don't verify the MAC.
-pub async fn recv_unauthenticated(stream: &mut TcpStream) -> Result<StellarMessage, Error> {
+pub(crate) async fn recv_unauthenticated(stream: &mut TcpStream) -> Result<StellarMessage, Error> {
     let auth_msg = read_message(stream, false)
         .await
         .map_err(Error::Framing)?;

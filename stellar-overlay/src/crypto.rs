@@ -1,12 +1,4 @@
 //! Cryptographic utilities for the Stellar overlay protocol.
-//!
-//! This module provides:
-//! - Ed25519 keypair generation for node identity
-//! - Curve25519 keypair generation for ECDH key exchange
-//! - Auth certificate creation and signing
-//! - ECDH shared secret derivation
-//! - HKDF key expansion for MAC keys
-//! - HMAC-SHA256 for message authentication
 
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use hmac::{Hmac, Mac};
@@ -19,7 +11,7 @@ use stellar_xdr::curr::{
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519SecretKey};
 
 /// Node identity using Ed25519 keypair.
-pub struct NodeIdentity {
+pub(crate) struct NodeIdentity {
     pub signing_key: SigningKey,
     pub public_key: VerifyingKey,
 }
@@ -48,7 +40,7 @@ impl NodeIdentity {
 }
 
 /// Curve25519 keypair for ECDH key exchange.
-pub struct EcdhKeypair {
+pub(crate) struct EcdhKeypair {
     pub secret: X25519SecretKey,
     pub public: X25519PublicKey,
 }
@@ -70,7 +62,7 @@ impl EcdhKeypair {
 }
 
 /// Generate a random 256-bit nonce.
-pub fn generate_nonce() -> Uint256 {
+pub(crate) fn generate_nonce() -> Uint256 {
     let mut nonce = [0u8; 32];
     rand::RngCore::fill_bytes(&mut OsRng, &mut nonce);
     Uint256(nonce)
@@ -82,7 +74,7 @@ pub fn generate_nonce() -> Uint256 {
 /// - Curve25519 public key for ECDH
 /// - Expiration timestamp
 /// - Ed25519 signature of (networkID || ENVELOPE_TYPE_AUTH || expiration || pubkey)
-pub fn create_auth_cert(
+pub(crate) fn create_auth_cert(
     network_id: &Hash,
     node_identity: &NodeIdentity,
     ecdh_keypair: &EcdhKeypair,
@@ -112,7 +104,7 @@ pub fn create_auth_cert(
 /// 1. Compute ECDH: q = scalarmult(localSecret, remotePublic)
 /// 2. Concatenate: q || publicA || publicB (A is local if we_are_initiator)
 /// 3. Return hkdfExtract(concatenated) = HMAC(zero_key, concatenated)
-pub fn ecdh_shared_secret(
+pub(crate) fn ecdh_shared_secret(
     our_secret: &X25519SecretKey,
     our_public: &X25519PublicKey,
     their_public: &Curve25519Public,
@@ -145,7 +137,7 @@ pub fn ecdh_shared_secret(
 ///
 /// For the responder (REMOTE_CALLED_US):
 ///   K_BA = hkdfExpand(shared_key, 1 || local_nonce || remote_nonce)
-pub fn derive_sending_mac_key(
+pub(crate) fn derive_sending_mac_key(
     shared_key: &HmacSha256Key,
     local_nonce: &Uint256,
     remote_nonce: &Uint256,
@@ -170,7 +162,7 @@ pub fn derive_sending_mac_key(
 ///
 /// For the responder (REMOTE_CALLED_US):
 ///   K_AB = hkdfExpand(shared_key, 0 || remote_nonce || local_nonce)
-pub fn derive_receiving_mac_key(
+pub(crate) fn derive_receiving_mac_key(
     shared_key: &HmacSha256Key,
     local_nonce: &Uint256,
     remote_nonce: &Uint256,
@@ -216,7 +208,7 @@ pub(crate) fn hmac_sha256(key: &HmacSha256Key, data: &[u8]) -> HmacSha256Mac {
 }
 
 /// SHA-256 hash function.
-pub fn sha256(data: &[u8]) -> [u8; 32] {
+pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
     use sha2::Digest;
     let mut hasher = Sha256::new();
     hasher.update(data);
@@ -224,6 +216,32 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
 }
 
 /// Compute the Stellar network ID from a passphrase.
+///
+/// The network ID is the SHA-256 hash of the network passphrase and is used
+/// to identify which Stellar network a node belongs to.
+///
+/// # Arguments
+///
+/// * `passphrase` - The network passphrase string
+///
+/// # Returns
+///
+/// A 32-byte hash that uniquely identifies the network.
+///
+/// # Examples
+///
+/// ```
+/// use stellar_overlay::network_id;
+///
+/// // Testnet
+/// let testnet = network_id("Test SDF Network ; September 2015");
+///
+/// // Mainnet
+/// let mainnet = network_id("Public Global Stellar Network ; September 2015");
+///
+/// // Local standalone network
+/// let local = network_id("Standalone Network ; February 2017");
+/// ```
 pub fn network_id(passphrase: &str) -> Hash {
     Hash(sha256(passphrase.as_bytes()))
 }

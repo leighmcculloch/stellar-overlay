@@ -10,7 +10,7 @@ use clap::Parser;
 use network::Network;
 use std::io::{self, IsTerminal, Read};
 use std::time::Duration;
-use stellar_overlay::{handshake, Event};
+use stellar_overlay::{handshake, Log};
 use stellar_xdr::curr::{ReadXdr, StellarMessage, TransactionEnvelope};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -119,12 +119,12 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Log a handshake event.
-fn log_event(event: Event) {
-    match event {
-        Event::Sending(msg) => eprintln!("➡️ {}", msg),
-        Event::Received(msg) => eprintln!("⬅️ {}", msg),
-        Event::Error(msg) => eprintln!("❌ {}", msg),
+/// Log a handshake log entry.
+fn log_event(log: Log) {
+    match log {
+        Log::Sending(msg) => eprintln!("➡️ {}", msg),
+        Log::Received(msg) => eprintln!("⬅️ {}", msg),
+        Log::Error(msg) => eprintln!("❌ {}", msg),
     }
 }
 
