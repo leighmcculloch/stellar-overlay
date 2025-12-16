@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update
+      - run: cargo build --release
+      - run: cargo test
+      - run: cargo test --test integration
+
+  cli-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update
+      - uses: stellar/stellar-cli@v23.3.0
+      - run: cargo install --locked --path .
+      - run: stellar network use testnet
+      - run: stellar keys generate me
+      - run: stellar tx new bump-sequence --source me --bump-to 1 --build-only | stellar tx sign --sign-with-key me | stellar-txsub
