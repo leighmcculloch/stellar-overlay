@@ -10,10 +10,13 @@ use clap::Parser;
 use network::Network;
 use std::io::{self, IsTerminal, Read};
 use std::time::Duration;
-use stellar_overlay::{handshake, Log};
+use stellar_overlay::handshake;
 use stellar_xdr::curr::{ReadXdr, StellarMessage, TransactionEnvelope};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::prelude::*;
 
 /// Submit transactions to the Stellar overlay network.
 ///
@@ -38,6 +41,19 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Set up tracing subscriber with custom formatting
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_level(false)
+                .with_span_events(FmtSpan::NONE)
+                .event_format(EventFormatter)
+                .with_writer(std::io::stderr)
+                .with_filter(LevelFilter::DEBUG),
+        )
+        .init();
+
     let args = Args::parse();
 
     // Check if stdin is a TTY (no input piped)
@@ -79,7 +95,7 @@ async fn main() -> Result<()> {
     // Perform handshake
     eprintln!("ℹ️ Performing handshake");
     let net_id = network.id();
-    let mut session = handshake(stream, net_id.clone(), log_event).await?;
+    let mut session = handshake(stream, net_id.clone()).await?;
     eprintln!("✅ Authenticated");
 
     // Send transaction
@@ -116,15 +132,6 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Log a handshake log entry.
-fn log_event(log: Log) {
-    match log {
-        Log::Sending(msg) => eprintln!("➡️ {}", msg),
-        Log::Received(msg) => eprintln!("⬅️ {}", msg),
-        Log::Error(msg) => eprintln!("❌ {}", msg),
-    }
-}
-
 /// Log an incoming message.
 fn log_incoming(msg: &StellarMessage) {
     let prefix = if matches!(msg, StellarMessage::ErrorMsg(_)) {
@@ -158,5 +165,119 @@ fn format_message(msg: &StellarMessage) -> String {
         }
         StellarMessage::Peers(peers) => format!("{}: count={}", msg.name(), peers.len()),
         _ => msg.name().to_string(),
+    }
+}
+
+/// Custom event formatter for tracing output.
+struct EventFormatter;
+
+impl<S, N> tracing_subscriber::fmt::FormatEvent<S, N> for EventFormatter
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    N: for<'a> tracing_subscriber::fmt::FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        _ctx: &tracing_subscriber::fmt::FmtContext<'_, S, N>,
+        mut writer: tracing_subscriber::fmt::format::Writer<'_>,
+        event: &tracing::Event<'_>,
+    ) -> std::fmt::Result {
+        // Extract fields from the event
+        let mut visitor = FieldVisitor::default();
+        event.record(&mut visitor);
+
+        // Format based on direction and level
+        let prefix = if event.metadata().level() == &tracing::Level::ERROR {
+            "❌"
+        } else if visitor.direction.as_deref() == Some("send") {
+            "➡️"
+        } else {
+            "⬅️"
+        };
+
+        // Build the message
+        let mut parts = Vec::new();
+        if let Some(msg) = &visitor.message {
+            parts.push(msg.clone());
+        }
+
+        // Add relevant fields
+        if let Some(v) = visitor.ledger_version {
+            parts.push(format!("ledger_version={}", v));
+        }
+        if let Some(v) = visitor.overlay_version {
+            parts.push(format!("overlay_version={}", v));
+        }
+        if let Some(v) = &visitor.version_str {
+            parts.push(format!("version_str={}", v));
+        }
+        if let Some(v) = visitor.flags {
+            parts.push(format!("flags={}", v));
+        }
+        if let Some(v) = visitor.num_messages {
+            parts.push(format!("num_messages={}", v));
+        }
+        if let Some(v) = visitor.num_bytes {
+            parts.push(format!("num_bytes={}", v));
+        }
+        if let Some(v) = &visitor.code {
+            parts.push(format!("code={}", v));
+        }
+        if let Some(v) = &visitor.error_message {
+            parts.push(v.clone());
+        }
+
+        writeln!(writer, "{} {}", prefix, parts.join(": "))
+    }
+}
+
+/// Visitor to extract fields from tracing events.
+#[derive(Default)]
+struct FieldVisitor {
+    direction: Option<String>,
+    message: Option<String>,
+    ledger_version: Option<u32>,
+    overlay_version: Option<u32>,
+    version_str: Option<String>,
+    flags: Option<i32>,
+    num_messages: Option<u32>,
+    num_bytes: Option<u32>,
+    code: Option<String>,
+    error_message: Option<String>,
+}
+
+impl tracing::field::Visit for FieldVisitor {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        match field.name() {
+            "direction" => self.direction = Some(value.to_string()),
+            "message" => self.message = Some(value.to_string()),
+            "version_str" => self.version_str = Some(value.to_string()),
+            "error_message" => self.error_message = Some(value.to_string()),
+            _ => {}
+        }
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        match field.name() {
+            "ledger_version" => self.ledger_version = Some(value as u32),
+            "overlay_version" => self.overlay_version = Some(value as u32),
+            "num_messages" => self.num_messages = Some(value as u32),
+            "num_bytes" => self.num_bytes = Some(value as u32),
+            _ => {}
+        }
+    }
+
+    fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
+        match field.name() {
+            "flags" => self.flags = Some(value as i32),
+            _ => {}
+        }
+    }
+
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        match field.name() {
+            "code" => self.code = Some(format!("{:?}", value)),
+            _ => {}
+        }
     }
 }

@@ -9,6 +9,7 @@ use rand::Rng;
 use stellar_xdr::curr::{Auth, ErrorCode, Hash, Hello, NodeId, StellarMessage};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
+use tracing::{debug, error};
 
 /// Current overlay protocol version.
 const OVERLAY_PROTOCOL_VERSION: u32 = 38;
@@ -74,44 +75,6 @@ pub enum Error {
     SystemTime,
 }
 
-/// Log entries emitted during the handshake process.
-///
-/// Pass a callback to [`handshake`] to receive these log entries for
-/// debugging or status reporting.
-///
-/// # Example
-///
-/// ```no_run
-/// use stellar_overlay::{handshake, Log};
-/// use stellar_xdr::curr::Hash;
-/// use tokio::net::TcpStream;
-///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let stream = TcpStream::connect("core-testnet1.stellar.org:11625").await?;
-/// let network_id = Hash(bytes_lit::bytes!(
-///     0xcee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472
-/// ));
-///
-/// let session = handshake(stream, network_id, |log| {
-///     match log {
-///         Log::Sending(msg) => println!("-> {}", msg),
-///         Log::Received(msg) => println!("<- {}", msg),
-///         Log::Error(msg) => eprintln!("Error: {}", msg),
-///     }
-/// }).await?;
-/// # Ok(())
-/// # }
-/// ```
-#[derive(Debug, Clone)]
-pub enum Log {
-    /// A protocol message is being sent to the peer.
-    Sending(String),
-    /// A protocol message was received from the peer.
-    Received(String),
-    /// An error message was received from the peer.
-    Error(String),
-}
-
 /// Perform an authenticated handshake with a Stellar Core peer.
 ///
 /// This function performs the Stellar overlay protocol handshake:
@@ -122,11 +85,12 @@ pub enum Log {
 /// On success, returns a [`PeerSession`] that can be used to send and receive
 /// protocol messages.
 ///
+/// Handshake progress is logged via the `tracing` crate at DEBUG level.
+///
 /// # Arguments
 ///
 /// * `stream` - A TCP connection to a Stellar Core node
 /// * `network_id` - The network ID (SHA-256 hash of the network passphrase)
-/// * `log` - Callback invoked with log entries during the handshake
 ///
 /// # Errors
 ///
@@ -139,7 +103,7 @@ pub enum Log {
 /// # Example
 ///
 /// ```no_run
-/// use stellar_overlay::{handshake, Log, PeerSession};
+/// use stellar_overlay::{handshake, PeerSession};
 /// use stellar_xdr::curr::Hash;
 /// use tokio::net::TcpStream;
 ///
@@ -150,9 +114,7 @@ pub enum Log {
 ///         0xcee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472
 ///     ));
 ///
-///     let session = handshake(stream, network_id, |log| {
-///         println!("{:?}", log);
-///     }).await?;
+///     let session = handshake(stream, network_id).await?;
 ///
 ///     Ok(session)
 /// }
@@ -160,7 +122,6 @@ pub enum Log {
 pub async fn handshake(
     mut stream: TcpStream,
     network_id: Hash,
-    mut log: impl FnMut(Log),
 ) -> Result<PeerSession, Error> {
     // Generate crypto material
     let node_identity = NodeIdentity::generate();
@@ -195,10 +156,13 @@ pub async fn handshake(
 
     // Send HELLO
     let hello_msg = StellarMessage::Hello(hello);
-    log(Log::Sending(format!(
-        "Hello: ledger_version={}, overlay_version={}, version_str={}",
-        LEDGER_PROTOCOL_VERSION, OVERLAY_PROTOCOL_VERSION, VERSION_STR
-    )));
+    debug!(
+        direction = "send",
+        message = "Hello",
+        ledger_version = LEDGER_PROTOCOL_VERSION,
+        overlay_version = OVERLAY_PROTOCOL_VERSION,
+        version_str = VERSION_STR,
+    );
     send_unauthenticated(&mut stream, hello_msg)
         .await
         .map_err(Error::Session)?;
@@ -209,17 +173,24 @@ pub async fn handshake(
         .map_err(Error::Session)?;
     let peer_hello = match peer_hello {
         StellarMessage::Hello(h) => {
-            log(Log::Received(format!(
-                "Hello: ledger_version={}, overlay_version={}, version_str={}",
-                h.ledger_version,
-                h.overlay_version,
-                String::from_utf8_lossy(&h.version_str.to_vec())
-            )));
+            let version_str = String::from_utf8_lossy(&h.version_str.to_vec()).to_string();
+            debug!(
+                direction = "recv",
+                message = "Hello",
+                ledger_version = h.ledger_version,
+                overlay_version = h.overlay_version,
+                version_str = version_str,
+            );
             h
         }
         StellarMessage::ErrorMsg(e) => {
             let message = String::from_utf8_lossy(&e.msg.to_vec()).to_string();
-            log(Log::Error(format!("ErrorMsg: {:?} - {}", e.code, message)));
+            error!(
+                direction = "recv",
+                message = "ErrorMsg",
+                code = ?e.code,
+                error_message = message,
+            );
             return Err(Error::PeerError {
                 code: e.code,
                 message,
@@ -267,35 +238,43 @@ pub async fn handshake(
         flags: AUTH_MSG_FLAG_FLOW_CONTROL_BYTES_REQUESTED,
     };
     let auth_msg = StellarMessage::Auth(auth);
-    log(Log::Sending(format!(
-        "Auth: flags={}",
-        AUTH_MSG_FLAG_FLOW_CONTROL_BYTES_REQUESTED
-    )));
+    debug!(
+        direction = "send",
+        message = "Auth",
+        flags = AUTH_MSG_FLAG_FLOW_CONTROL_BYTES_REQUESTED,
+    );
     session.send_message(auth_msg).await.map_err(Error::Session)?;
 
     // Receive response (could be AUTH, SEND_MORE_EXTENDED, or ERROR)
     let response = session.recv().await.map_err(Error::Session)?;
     match response {
         StellarMessage::Auth(a) => {
-            log(Log::Received(format!("Auth: flags={}", a.flags)));
+            debug!(direction = "recv", message = "Auth", flags = a.flags);
             Ok(session)
         }
         StellarMessage::SendMoreExtended(s) => {
-            log(Log::Received(format!(
-                "SendMoreExtended: num_messages={}, num_bytes={}",
-                s.num_messages, s.num_bytes
-            )));
+            debug!(
+                direction = "recv",
+                message = "SendMoreExtended",
+                num_messages = s.num_messages,
+                num_bytes = s.num_bytes,
+            );
             // Peer sent SEND_MORE_EXTENDED before AUTH, which is valid
             // Wait for AUTH
             let auth_response = session.recv().await.map_err(Error::Session)?;
             match auth_response {
                 StellarMessage::Auth(a) => {
-                    log(Log::Received(format!("Auth: flags={}", a.flags)));
+                    debug!(direction = "recv", message = "Auth", flags = a.flags);
                     Ok(session)
                 }
                 StellarMessage::ErrorMsg(e) => {
                     let message = String::from_utf8_lossy(&e.msg.to_vec()).to_string();
-                    log(Log::Error(format!("ErrorMsg: {:?} - {}", e.code, message)));
+                    error!(
+                        direction = "recv",
+                        message = "ErrorMsg",
+                        code = ?e.code,
+                        error_message = message,
+                    );
                     Err(Error::PeerError {
                         code: e.code,
                         message,
@@ -309,7 +288,12 @@ pub async fn handshake(
         }
         StellarMessage::ErrorMsg(e) => {
             let message = String::from_utf8_lossy(&e.msg.to_vec()).to_string();
-            log(Log::Error(format!("ErrorMsg: {:?} - {}", e.code, message)));
+            error!(
+                direction = "recv",
+                message = "ErrorMsg",
+                code = ?e.code,
+                error_message = message,
+            );
             Err(Error::PeerError {
                 code: e.code,
                 message,

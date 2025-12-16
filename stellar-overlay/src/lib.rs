@@ -16,7 +16,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use stellar_overlay::{handshake, Log};
+//! use stellar_overlay::handshake;
 //! use stellar_xdr::curr::{Hash, StellarMessage, TransactionEnvelope};
 //! use tokio::net::TcpStream;
 //!
@@ -32,13 +32,7 @@
 //!     ));
 //!
 //!     // Perform authenticated handshake
-//!     let mut session = handshake(stream, network_id, |log| {
-//!         match log {
-//!             Log::Sending(msg) => println!("-> {}", msg),
-//!             Log::Received(msg) => println!("<- {}", msg),
-//!             Log::Error(msg) => eprintln!("Error: {}", msg),
-//!         }
-//!     }).await?;
+//!     let mut session = handshake(stream, network_id).await?;
 //!
 //!     // Send a transaction
 //!     // let tx: TransactionEnvelope = ...;
@@ -52,6 +46,12 @@
 //! }
 //! ```
 //!
+//! # Tracing
+//!
+//! This crate uses the [`tracing`](https://docs.rs/tracing) crate for logging.
+//! Handshake events are logged at DEBUG level. Set up a tracing subscriber
+//! in your application to see these logs.
+//!
 //! # Networks
 //!
 //! See <https://developers.stellar.org/docs/networks> for network passphrases,
@@ -62,5 +62,5 @@ mod framing;
 mod handshake;
 mod session;
 
-pub use handshake::{handshake, Error, Log};
+pub use handshake::{handshake, Error};
 pub use session::PeerSession;
