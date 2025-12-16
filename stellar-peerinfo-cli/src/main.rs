@@ -107,8 +107,6 @@ async fn main() -> Result<()> {
             let handle = tokio::spawn(async move {
                 let _permit = sem.acquire().await.unwrap();
 
-                eprintln!("Connecting to {} (depth {})...", addr, depth);
-
                 let (output, known_peers) =
                     get_peer_info(&addr, &net_id, timeout_duration).await;
 
