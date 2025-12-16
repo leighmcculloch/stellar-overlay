@@ -24,4 +24,5 @@ jobs:
       - run: cargo install --locked --path .
       - run: stellar network use testnet
       - run: stellar keys generate me
+      - run: stellar keys fund me
       - run: stellar tx new bump-sequence --source me --bump-to 1 --build-only | stellar tx sign --sign-with-key me | stellar-txsub
