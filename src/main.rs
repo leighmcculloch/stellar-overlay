@@ -79,7 +79,7 @@ async fn main() -> Result<()> {
         "mainnet" | "main" | "pubnet" | "public" => {
             (MAINNET_PASSPHRASE, "core-live-a.stellar.org:11625")
         }
-        "local" | "standalone" => (LOCAL_PASSPHRASE, "localhost:11625"),
+        "local" => (LOCAL_PASSPHRASE, "localhost:11625"),
         _ => (&*args.network, "localhost:11625"),
     };
 

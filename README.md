@@ -30,9 +30,9 @@ Reads a base64-encoded transaction envelope from stdin and submits it to the net
 
 | Network | Shorthands | Default Peer |
 |---------|------------|--------------|
-| Testnet | `testnet`, `test` | `core-testnet1.stellar.org:11625` |
-| Mainnet | `mainnet`, `main`, `pubnet`, `public` | `core-live-a.stellar.org:11625` |
-| Local | `local`, `standalone` | `localhost:11625` |
+| Testnet | `testnet` | `core-testnet1.stellar.org:11625` |
+| Mainnet | `mainnet` | `core-live-a.stellar.org:11625` |
+| Local | `local` | `localhost:11625` |
 
 Or provide a custom network passphrase directly (defaults to `localhost:11625`).
 
@@ -48,7 +48,7 @@ Submit to mainnet:
 echo "AAAAAgAAAA..." | stellar-txsub --network mainnet
 ```
 
-Submit to local standalone network:
+Submit to local network ([stellar/quickstart](https://github.com/stellar/quickstart)):
 ```
 echo "AAAAAgAAAA..." | stellar-txsub --network local
 ```
