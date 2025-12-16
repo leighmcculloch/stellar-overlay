@@ -81,14 +81,17 @@ pub enum Error {
 /// # Example
 ///
 /// ```no_run
-/// use stellar_overlay::{handshake, Log, network_id};
+/// use stellar_overlay::{handshake, Log};
+/// use stellar_xdr::curr::Hash;
 /// use tokio::net::TcpStream;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let stream = TcpStream::connect("core-testnet1.stellar.org:11625").await?;
-/// let network = network_id("Test SDF Network ; September 2015");
+/// let network_id = Hash(bytes_lit::bytes!(
+///     0xcee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472
+/// ));
 ///
-/// let session = handshake(stream, network, 11625, |log| {
+/// let session = handshake(stream, network_id, 11625, |log| {
 ///     match log {
 ///         Log::Sending(msg) => println!("-> {}", msg),
 ///         Log::Received(msg) => println!("<- {}", msg),
@@ -121,7 +124,7 @@ pub enum Log {
 /// # Arguments
 ///
 /// * `stream` - A TCP connection to a Stellar Core node
-/// * `network_id` - The network ID (hash of network passphrase). Use [`network_id`](crate::network_id) to compute this.
+/// * `network_id` - The network ID (SHA-256 hash of the network passphrase)
 /// * `listening_port` - The port to advertise in the HELLO message (typically 11625)
 /// * `log` - Callback invoked with log entries during the handshake
 ///
@@ -136,14 +139,18 @@ pub enum Log {
 /// # Example
 ///
 /// ```no_run
-/// use stellar_overlay::{handshake, Log, network_id, PeerSession};
+/// use stellar_overlay::{handshake, Log, PeerSession};
+/// use stellar_xdr::curr::Hash;
 /// use tokio::net::TcpStream;
 ///
 /// async fn connect_to_testnet() -> Result<PeerSession, Box<dyn std::error::Error>> {
 ///     let stream = TcpStream::connect("core-testnet1.stellar.org:11625").await?;
-///     let network = network_id("Test SDF Network ; September 2015");
+///     // Testnet network ID
+///     let network_id = Hash(bytes_lit::bytes!(
+///         0xcee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472
+///     ));
 ///
-///     let session = handshake(stream, network, 11625, |log| {
+///     let session = handshake(stream, network_id, 11625, |log| {
 ///         println!("{:?}", log);
 ///     }).await?;
 ///

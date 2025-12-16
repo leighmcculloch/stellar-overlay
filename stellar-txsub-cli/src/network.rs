@@ -1,6 +1,6 @@
 //! Stellar network configuration.
 
-use stellar_overlay::network_id;
+use sha2::{Digest, Sha256};
 use stellar_xdr::curr::Hash;
 
 /// Stellar network configuration.
@@ -42,8 +42,9 @@ impl Network {
         }
     }
 
-    /// Compute the network ID (hash of passphrase).
+    /// Compute the network ID (SHA-256 hash of passphrase).
     pub fn id(&self) -> Hash {
-        network_id(self.passphrase())
+        let hash: [u8; 32] = Sha256::digest(self.passphrase().as_bytes()).into();
+        Hash(hash)
     }
 }

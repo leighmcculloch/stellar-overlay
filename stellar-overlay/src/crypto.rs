@@ -217,32 +217,9 @@ pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
 
 /// Compute the Stellar network ID from a passphrase.
 ///
-/// The network ID is the SHA-256 hash of the network passphrase and is used
-/// to identify which Stellar network a node belongs to.
-///
-/// # Arguments
-///
-/// * `passphrase` - The network passphrase string
-///
-/// # Returns
-///
-/// A 32-byte hash that uniquely identifies the network.
-///
-/// # Examples
-///
-/// ```
-/// use stellar_overlay::network_id;
-///
-/// // Testnet
-/// let testnet = network_id("Test SDF Network ; September 2015");
-///
-/// // Mainnet
-/// let mainnet = network_id("Public Global Stellar Network ; September 2015");
-///
-/// // Local standalone network
-/// let local = network_id("Standalone Network ; February 2017");
-/// ```
-pub fn network_id(passphrase: &str) -> Hash {
+/// The network ID is the SHA-256 hash of the network passphrase.
+#[cfg(test)]
+fn network_id(passphrase: &str) -> Hash {
     Hash(sha256(passphrase.as_bytes()))
 }
 

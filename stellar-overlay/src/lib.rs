@@ -16,8 +16,8 @@
 //! # Example
 //!
 //! ```no_run
-//! use stellar_overlay::{handshake, network_id, Log};
-//! use stellar_xdr::curr::{StellarMessage, TransactionEnvelope};
+//! use stellar_overlay::{handshake, Log};
+//! use stellar_xdr::curr::{Hash, StellarMessage, TransactionEnvelope};
 //! use tokio::net::TcpStream;
 //!
 //! #[tokio::main]
@@ -25,11 +25,14 @@
 //!     // Connect to a Stellar Core node
 //!     let stream = TcpStream::connect("core-testnet1.stellar.org:11625").await?;
 //!
-//!     // Compute network ID from passphrase
-//!     let network = network_id("Test SDF Network ; September 2015");
+//!     // Network ID is the SHA-256 hash of the network passphrase
+//!     // This is the testnet network ID
+//!     let network_id = Hash(bytes_lit::bytes!(
+//!         0xcee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472
+//!     ));
 //!
 //!     // Perform authenticated handshake
-//!     let mut session = handshake(stream, network, 11625, |log| {
+//!     let mut session = handshake(stream, network_id, 11625, |log| {
 //!         match log {
 //!             Log::Sending(msg) => println!("-> {}", msg),
 //!             Log::Received(msg) => println!("<- {}", msg),
@@ -49,26 +52,15 @@
 //! }
 //! ```
 //!
-//! # Network Passphrases
+//! # Networks
 //!
-//! Common network passphrases:
-//!
-//! - **Testnet**: `"Test SDF Network ; September 2015"`
-//! - **Mainnet**: `"Public Global Stellar Network ; September 2015"`
-//! - **Local/Standalone**: `"Standalone Network ; February 2017"`
-//!
-//! # Known Peers
-//!
-//! Some known peers useful for testing:
-//!
-//! - **Testnet**: `core-testnet1.stellar.org:11625`
-//! - **Mainnet**: `core-live-a.stellar.org:11625`
+//! See <https://developers.stellar.org/docs/networks> for network passphrases,
+//! network IDs, and known peers.
 
 mod crypto;
 mod framing;
 mod handshake;
 mod session;
 
-pub use crypto::network_id;
 pub use handshake::{handshake, Error, Log};
 pub use session::PeerSession;
