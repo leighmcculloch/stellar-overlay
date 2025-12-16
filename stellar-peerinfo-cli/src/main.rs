@@ -11,6 +11,7 @@ use network::Network;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use stellar_overlay::connect;
@@ -53,7 +54,7 @@ struct Args {
     output: OutputFormat,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, ValueEnum)]
 enum OutputFormat {
     /// NDJSON output (one JSON object per line)
     Json,
@@ -96,70 +97,46 @@ struct PeerInfo {
     ledger_version: u32,
 }
 
-/// Network graph for mermaid output.
-struct PeerGraph {
-    /// Map from address to peer info (if successfully connected)
-    nodes: HashMap<String, Option<PeerInfo>>,
-    /// Edges: source address -> list of known peer addresses
-    edges: HashMap<String, Vec<String>>,
+/// Output message for the output handler.
+enum OutputMessage {
+    Json(PeerOutput),
+    MermaidNode {
+        id: usize,
+        addr: String,
+        info: Option<PeerInfo>,
+    },
+    MermaidEdges {
+        from_id: usize,
+        to_ids: Vec<usize>,
+    },
 }
 
-impl PeerGraph {
+/// Tracks node IDs for mermaid output.
+struct NodeIdTracker {
+    addr_to_id: HashMap<String, usize>,
+    next_id: AtomicUsize,
+}
+
+impl NodeIdTracker {
     fn new() -> Self {
         Self {
-            nodes: HashMap::new(),
-            edges: HashMap::new(),
+            addr_to_id: HashMap::new(),
+            next_id: AtomicUsize::new(0),
         }
     }
 
-    fn add_node(&mut self, address: String, info: Option<PeerInfo>) {
-        self.nodes.insert(address, info);
+    fn get_or_assign(&mut self, addr: &str) -> usize {
+        if let Some(&id) = self.addr_to_id.get(addr) {
+            id
+        } else {
+            let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+            self.addr_to_id.insert(addr.to_string(), id);
+            id
+        }
     }
 
-    fn add_edges(&mut self, from: String, to: Vec<String>) {
-        self.edges.insert(from, to);
-    }
-
-    fn to_mermaid(&self) -> String {
-        let mut output = String::new();
-        output.push_str("graph LR\n");
-
-        // Create node definitions with short IDs
-        let mut addr_to_id: HashMap<&str, String> = HashMap::new();
-        for (i, addr) in self.nodes.keys().enumerate() {
-            let id = format!("N{}", i);
-            addr_to_id.insert(addr.as_str(), id);
-        }
-
-        // Add node labels
-        for (addr, info) in &self.nodes {
-            let id = addr_to_id.get(addr.as_str()).unwrap();
-            let label = if let Some(info) = info {
-                // Use short peer ID (first 8 chars)
-                let short_id = if info.peer_id.len() > 8 {
-                    &info.peer_id[..8]
-                } else {
-                    &info.peer_id
-                };
-                format!("{}[\"{}\\n{}\\n{}\"]", id, addr, short_id, info.version)
-            } else {
-                format!("{}[\"{}\\n(unreachable)\"]", id, addr)
-            };
-            output.push_str(&format!("    {}\n", label));
-        }
-
-        // Add edges
-        for (from, tos) in &self.edges {
-            if let Some(from_id) = addr_to_id.get(from.as_str()) {
-                for to in tos {
-                    if let Some(to_id) = addr_to_id.get(to.as_str()) {
-                        output.push_str(&format!("    {} --> {}\n", from_id, to_id));
-                    }
-                }
-            }
-        }
-
-        output
+    fn get(&self, addr: &str) -> Option<usize> {
+        self.addr_to_id.get(addr).copied()
     }
 }
 
@@ -186,30 +163,55 @@ async fn main() -> Result<()> {
     let timeout_duration = Duration::from_secs(args.timeout);
     let semaphore = Arc::new(Semaphore::new(args.concurrency));
 
-    // Track visited addresses and the graph
+    // Track visited addresses and node IDs
     let visited = Arc::new(Mutex::new(HashSet::<String>::new()));
-    let graph = Arc::new(Mutex::new(PeerGraph::new()));
+    let node_ids = Arc::new(Mutex::new(NodeIdTracker::new()));
 
-    // Channel for streaming JSON output
-    let (tx, mut rx) = mpsc::unbounded_channel::<PeerOutput>();
+    // Channel for output
+    let (tx, mut rx) = mpsc::unbounded_channel::<OutputMessage>();
 
-    // Spawn output handler for JSON mode
+    // Print mermaid header if needed
     let output_format = args.output;
+    if output_format == OutputFormat::Mermaid {
+        println!("graph LR");
+    }
+
+    // Spawn output handler
     let output_handle = tokio::spawn(async move {
-        if matches!(output_format, OutputFormat::Json) {
-            while let Some(output) = rx.recv().await {
-                println!("{}", serde_json::to_string(&output).unwrap());
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                OutputMessage::Json(output) => {
+                    println!("{}", serde_json::to_string(&output).unwrap());
+                }
+                OutputMessage::MermaidNode { id, addr, info } => {
+                    let label = if let Some(info) = info {
+                        let short_id = if info.peer_id.len() > 8 {
+                            &info.peer_id[..8]
+                        } else {
+                            &info.peer_id
+                        };
+                        format!(
+                            "    N{}[\"{}\\n{}\\n{}\"]",
+                            id, addr, short_id, info.version
+                        )
+                    } else {
+                        format!("    N{}[\"{}\\n(unreachable)\"]", id, addr)
+                    };
+                    println!("{}", label);
+                }
+                OutputMessage::MermaidEdges { from_id, to_ids } => {
+                    for to_id in to_ids {
+                        println!("    N{} --> N{}", from_id, to_id);
+                    }
+                }
             }
-        } else {
-            // Drain the channel but don't print (mermaid prints at end)
-            while rx.recv().await.is_some() {}
         }
     });
 
     // BFS queue: (address, depth)
     let queue = Arc::new(Mutex::new(VecDeque::<(String, usize)>::new()));
 
-    // Add initial peer
+    // Add initial peer and assign its ID
     {
         let mut q = queue.lock().await;
         q.push_back((initial_peer.to_string(), 0));
@@ -217,6 +219,10 @@ async fn main() -> Result<()> {
     {
         let mut v = visited.lock().await;
         v.insert(initial_peer.to_string());
+    }
+    {
+        let mut ids = node_ids.lock().await;
+        ids.get_or_assign(initial_peer);
     }
 
     let max_depth = args.depth;
@@ -244,9 +250,10 @@ async fn main() -> Result<()> {
             let sem = semaphore.clone();
             let net_id = net_id.clone();
             let tx = tx.clone();
-            let graph = graph.clone();
             let queue = queue.clone();
             let visited = visited.clone();
+            let node_ids = node_ids.clone();
+            let output_format = args.output;
 
             let handle = tokio::spawn(async move {
                 let _permit = sem.acquire().await.unwrap();
@@ -255,46 +262,73 @@ async fn main() -> Result<()> {
 
                 let result = get_peer_with_peers(&addr, &net_id, timeout_duration).await;
 
-                // Update graph
-                {
-                    let mut g = graph.lock().await;
-                    g.add_node(addr.clone(), result.info.clone());
-                    if !result.known_peers.is_empty() {
-                        g.add_edges(addr.clone(), result.known_peers.clone());
+                // Get this node's ID
+                let node_id = {
+                    let ids = node_ids.lock().await;
+                    ids.get(&addr).unwrap()
+                };
+
+                // Send output
+                match output_format {
+                    OutputFormat::Json => {
+                        let output = if let Some(ref info) = result.info {
+                            PeerOutput {
+                                output_type: "info".to_string(),
+                                peer_id: Some(info.peer_id.clone()),
+                                peer_address: Some(addr.clone()),
+                                version: Some(info.version.clone()),
+                                overlay_version: Some(info.overlay_version),
+                                ledger_version: Some(info.ledger_version),
+                                error: None,
+                            }
+                        } else {
+                            PeerOutput {
+                                output_type: "error".to_string(),
+                                peer_id: None,
+                                peer_address: Some(addr.clone()),
+                                version: None,
+                                overlay_version: None,
+                                ledger_version: None,
+                                error: result.error.clone(),
+                            }
+                        };
+                        let _ = tx.send(OutputMessage::Json(output));
+                    }
+                    OutputFormat::Mermaid => {
+                        // Output node definition
+                        let _ = tx.send(OutputMessage::MermaidNode {
+                            id: node_id,
+                            addr: addr.clone(),
+                            info: result.info.clone(),
+                        });
+
+                        // Assign IDs to known peers and output edges
+                        if !result.known_peers.is_empty() {
+                            let to_ids: Vec<usize> = {
+                                let mut ids = node_ids.lock().await;
+                                result
+                                    .known_peers
+                                    .iter()
+                                    .map(|peer_addr| ids.get_or_assign(peer_addr))
+                                    .collect()
+                            };
+                            let _ = tx.send(OutputMessage::MermaidEdges {
+                                from_id: node_id,
+                                to_ids,
+                            });
+                        }
                     }
                 }
-
-                // Send JSON output
-                let output = if let Some(ref info) = result.info {
-                    PeerOutput {
-                        output_type: "info".to_string(),
-                        peer_id: Some(info.peer_id.clone()),
-                        peer_address: Some(addr.clone()),
-                        version: Some(info.version.clone()),
-                        overlay_version: Some(info.overlay_version),
-                        ledger_version: Some(info.ledger_version),
-                        error: None,
-                    }
-                } else {
-                    PeerOutput {
-                        output_type: "error".to_string(),
-                        peer_id: None,
-                        peer_address: Some(addr.clone()),
-                        version: None,
-                        overlay_version: None,
-                        ledger_version: None,
-                        error: result.error,
-                    }
-                };
-                let _ = tx.send(output);
 
                 // Add newly discovered peers to queue if within depth limit
                 if depth < max_depth {
                     let mut v = visited.lock().await;
                     let mut q = queue.lock().await;
+                    let mut ids = node_ids.lock().await;
                     for peer_addr in result.known_peers {
                         if !v.contains(&peer_addr) {
                             v.insert(peer_addr.clone());
+                            ids.get_or_assign(&peer_addr);
                             q.push_back((peer_addr, depth + 1));
                         }
                     }
@@ -315,12 +349,6 @@ async fn main() -> Result<()> {
 
     // Wait for output handler
     output_handle.await?;
-
-    // Print mermaid output if requested
-    if matches!(args.output, OutputFormat::Mermaid) {
-        let g = graph.lock().await;
-        println!("{}", g.to_mermaid());
-    }
 
     Ok(())
 }
