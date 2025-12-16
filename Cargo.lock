@@ -695,7 +695,6 @@ dependencies = [
 name = "stellar-overlay"
 version = "0.1.0"
 dependencies = [
- "base64",
  "bytes-lit",
  "ed25519-dalek",
  "hmac",
@@ -740,6 +739,7 @@ version = "25.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10d20dafed80076b227d4b17c0c508a4bbc4d5e4c3d4c1de7cd42242df4b1eaf"
 dependencies = [
+ "base64",
  "cfg_eval",
  "crate-git-revision",
  "escape-bytes",

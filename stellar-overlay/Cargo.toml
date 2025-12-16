@@ -17,4 +17,4 @@ tracing = "0.1"
 
 [dev-dependencies]
 bytes-lit = "0.0.5"
-base64 = "0.22"
+stellar-xdr = { version = "25", features = ["base64"] }

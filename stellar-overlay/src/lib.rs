@@ -17,7 +17,7 @@
 //!
 //! ```no_run
 //! use stellar_overlay::connect;
-//! use stellar_xdr::curr::{Hash, StellarMessage, TransactionEnvelope};
+//! use stellar_xdr::curr::{Hash, ReadXdr, StellarMessage, TransactionEnvelope, Limits};
 //! use tokio::net::TcpStream;
 //!
 //! #[tokio::main]
@@ -34,10 +34,10 @@
 //!     // Perform authenticated handshake
 //!     let mut session = connect(stream, network_id).await?;
 //!
-//!     // Send a transaction (assuming you have a TransactionEnvelope)
+//!     // Send a transaction
+//!     let tx_xdr = "...";
 //!     # let tx_xdr = "AAAAAgAAAADg3G3hclysZlFitS+s5zWyiiJD5B0STWy5LXCj6i5yxQAABdwAHqGTAAAAzgAAAAEAAAAAAAAAAAAAAABne15zAAAAAAAAAAEAAAAAAAAAGAAAAAAAAAABzALUUAAAAEBJmWgZ8/HGWgdJsX3Bf/AM7L+K/Dyy6BVf9AMIlUG+1KF/alr/sEtKUufdJMmJqT/stLnQHf3BGCwLOC8KhYgDAAAABgAAAALMAtRQAAAAFAAAAAEAAAAAAC1dBwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY=";
-//!     # let tx_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, tx_xdr).unwrap();
-//!     # let tx: TransactionEnvelope = stellar_xdr::curr::ReadXdr::from_xdr(&tx_bytes, stellar_xdr::curr::Limits::none()).unwrap();
+//!     let tx = TransactionEnvelope::from_xdr_base64(tx_xdr, Limits::none())?;
 //!     session.send_message(StellarMessage::Transaction(tx)).await?;
 //!
 //!     // Receive messages from the peer
