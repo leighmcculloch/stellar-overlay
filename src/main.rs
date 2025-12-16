@@ -123,6 +123,9 @@ async fn main() -> Result<()> {
         }
     }
 
+    eprintln!("⚠️ This tool does not confirm if the transaction was successful.");
+    eprintln!("⚠️ Use the hash to check the status with a block explorer.");
+
     Ok(())
 }
 
