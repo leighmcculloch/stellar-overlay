@@ -2,7 +2,7 @@
 
 Get peer information from the Stellar network via the peer-to-peer overlay protocol.
 
-Connects directly to stellar-core nodes, discovers peers recursively, and outputs peer information or a network graph.
+Connects directly to stellar-core nodes, discovers peers recursively, and outputs peer information as NDJSON.
 
 ## Example
 
@@ -14,27 +14,13 @@ Connecting to 34.123.45.67:11625 (depth 0)...
 {"type":"info","peer_id":"c3d4...","peer_address":"34.123.45.67:11625","version":"v21.0.0","overlay_version":35,"ledger_version":21}
 ```
 
-## Output Formats
-
-### JSON (default)
+## Output
 
 NDJSON (newline-delimited JSON) to stdout, with one JSON object per peer:
 
 ```json
 {"type":"info","peer_id":"...","peer_address":"1.2.3.4:11625","version":"v21.0.0","overlay_version":35,"ledger_version":21}
 {"type":"error","peer_address":"5.6.7.8:11625","error":"Connection timeout"}
-```
-
-### Mermaid
-
-MermaidJS graph diagram showing network topology:
-
-```
-$ stellar-peerinfo --network testnet --depth 1 --output mermaid
-graph LR
-    N0["core-testnet1.stellar.org:11625\na1b2c3d4\nv21.0.0"]
-    N1["34.123.45.67:11625\ne5f6g7h8\nv21.0.0"]
-    N0 --> N1
 ```
 
 ## Install
@@ -63,7 +49,6 @@ Connects to a Stellar Core node, discovers peers, and collects information from 
 | `--timeout` | `-t` | `10` | Timeout in seconds for responses |
 | `--concurrency` | `-j` | `10` | Maximum concurrent peer connections |
 | `--depth` | `-d` | `0` | Recursion depth (0 = no recursion) |
-| `--output` | `-o` | `json` | Output format: `json` or `mermaid` |
 
 ### Network Short Names
 
@@ -91,11 +76,6 @@ stellar-peerinfo --network testnet
 Recursively explore peers (2 levels deep):
 ```
 stellar-peerinfo --network testnet --depth 2
-```
-
-Generate a network graph:
-```
-stellar-peerinfo --network testnet --depth 1 --output mermaid > graph.md
 ```
 
 Get peer info from mainnet with high concurrency:
