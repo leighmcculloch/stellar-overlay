@@ -16,7 +16,7 @@ use stellar_xdr::curr::{ReadXdr, StellarMessage, TransactionEnvelope};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-use crate::crypto::{network_id, MAINNET_PASSPHRASE, TESTNET_PASSPHRASE};
+use crate::crypto::{network_id, LOCAL_PASSPHRASE, MAINNET_PASSPHRASE, TESTNET_PASSPHRASE};
 use crate::handshake::handshake;
 
 /// Submit transactions to the Stellar overlay network.
@@ -28,8 +28,8 @@ use crate::handshake::handshake;
 #[command(name = "stellar-txsub", version, about)]
 struct Args {
     /// Peer address to connect to (host:port)
-    #[arg(short, long, default_value = "core-testnet1.stellar.org:11625")]
-    peer: String,
+    #[arg(short, long)]
+    peer: Option<String>,
 
     /// Network passphrase (or "testnet" / "mainnet")
     #[arg(short, long, default_value = "testnet")]
@@ -72,17 +72,27 @@ async fn main() -> Result<()> {
         TransactionEnvelope::from_xdr(&tx_bytes, stellar_xdr::curr::Limits::none())
             .context("Failed to parse transaction envelope")?;
 
-    // Resolve network passphrase
+    // Resolve network passphrase and default peer
     let network_lower = args.network.to_lowercase();
-    let passphrase = match network_lower.as_str() {
-        "testnet" | "test" => TESTNET_PASSPHRASE,
-        "mainnet" | "main" | "pubnet" | "public" => MAINNET_PASSPHRASE,
-        _ => &args.network,
+    let (passphrase, default_peer) = match network_lower.as_str() {
+        "testnet" | "test" => (TESTNET_PASSPHRASE, "core-testnet1.stellar.org:11625"),
+        "mainnet" | "main" | "pubnet" | "public" => {
+            (MAINNET_PASSPHRASE, "core-live-a.stellar.org:11625")
+        }
+        "local" | "standalone" => (LOCAL_PASSPHRASE, "localhost:11625"),
+        _ => (&*args.network, "localhost:11625"),
+    };
+
+    // Use specified peer or default for the network
+    let peer = if args.peer.is_some() {
+        args.peer.as_ref().unwrap()
+    } else {
+        default_peer
     };
 
     // Connect to peer
-    eprintln!("ℹ️ Connecting to {}", args.peer);
-    let stream = TcpStream::connect(&args.peer)
+    eprintln!("ℹ️ Connecting to {}", peer);
+    let stream = TcpStream::connect(peer)
         .await
         .context("Failed to connect to peer")?;
     eprintln!("✅ Connected");

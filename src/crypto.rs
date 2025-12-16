@@ -235,6 +235,9 @@ pub const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
 /// Mainnet (public) network passphrase.
 pub const MAINNET_PASSPHRASE: &str = "Public Global Stellar Network ; September 2015";
 
+/// Local network passphrase (stellar/quickstart standalone).
+pub const LOCAL_PASSPHRASE: &str = "Standalone Network ; February 2017";
+
 #[cfg(test)]
 mod tests {
     use super::*;

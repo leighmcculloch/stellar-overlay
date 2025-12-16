@@ -22,16 +22,19 @@ Reads a base64-encoded transaction envelope from stdin and submits it to the net
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--peer` | `-p` | `core-testnet1.stellar.org:11625` | Peer address (host:port) |
+| `--peer` | `-p` | (per network) | Peer address (host:port) |
 | `--network` | `-n` | `testnet` | Network passphrase or shorthand |
 | `--timeout` | `-t` | `5` | Timeout in seconds for responses |
 
 ### Network Shorthands
 
-- `testnet`, `test` - Test SDF Network
-- `mainnet`, `main`, `pubnet`, `public` - Public Global Stellar Network
+| Network | Shorthands | Default Peer |
+|---------|------------|--------------|
+| Testnet | `testnet`, `test` | `core-testnet1.stellar.org:11625` |
+| Mainnet | `mainnet`, `main`, `pubnet`, `public` | `core-live-a.stellar.org:11625` |
+| Local | `local`, `standalone` | `localhost:11625` |
 
-Or provide a custom network passphrase directly.
+Or provide a custom network passphrase directly (defaults to `localhost:11625`).
 
 ## Examples
 
@@ -42,7 +45,12 @@ echo "AAAAAgAAAA..." | stellar-txsub
 
 Submit to mainnet:
 ```
-echo "AAAAAgAAAA..." | stellar-txsub --network mainnet --peer core-live-a.stellar.org:11625
+echo "AAAAAgAAAA..." | stellar-txsub --network mainnet
+```
+
+Submit to local standalone network:
+```
+echo "AAAAAgAAAA..." | stellar-txsub --network local
 ```
 
 Submit with custom timeout:
