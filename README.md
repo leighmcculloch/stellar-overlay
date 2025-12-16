@@ -16,16 +16,16 @@ $ stellar keys fund me
 $ stellar tx new bump-sequence --source me --bump-to 1 --build-only \
   | stellar tx sign --sign-with-key me \
   | stellar-txsub --network testnet
-ℹ️ Signing transaction: 29eea3e42d4f649eecec0e9f5c654951263bcd17d73f2a8edcd25936bc90dc46
+ℹ️ Signing transaction: 8259924af89a287a36c3dc177b1fb387c41d5baf4ac234b2ece96f9f185777ab                    
 ℹ️ Connecting to core-testnet1.stellar.org:11625
 ✅ Connected
 ℹ️ Performing handshake
-➡️ HELLO: ledger_version=25, overlay_version=38, version_str=stellar-txsub 0.1.0
-⬅️ HELLO: ledger_version=25, overlay_version=38, version_str=stellar-core 25.0.0 (e9748b05a70d613437a52c8388dc0d8e68149394)
-➡️ AUTH: flags=200
-⬅️ AUTH: flags=200
+➡️ Hello: ledger_version=25, overlay_version=38, version_str=stellar-txsub 0.1.0
+⬅️ Hello: ledger_version=25, overlay_version=38, version_str=stellar-core 25.0.0 (e9748b05a70d613437a52c8388dc0d8e68149394)
+➡️ Auth: flags=200
+⬅️ Auth: flags=200
 ✅ Authenticated
-➡️ TRANSACTION: hash=29eea3e42d4f649eecec0e9f5c654951263bcd17d73f2a8edcd25936bc90dc46
+➡️ Transaction: hash=8259924af89a287a36c3dc177b1fb387c41d5baf4ac234b2ece96f9f185777ab
 ⬅️ Peers: count=50
 ⬅️ SendMoreExtended: num_messages=200, num_bytes=300000
 ⬅️ GetScpState
