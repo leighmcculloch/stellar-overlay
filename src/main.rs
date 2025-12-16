@@ -16,7 +16,7 @@ mod handshake;
 mod session;
 
 use anyhow::{Context, Result};
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 use std::time::Duration;
 use stellar_xdr::curr::{ReadXdr, StellarMessage, TransactionEnvelope};
 use tokio::net::TcpStream;
@@ -36,6 +36,12 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Check if stdin is a TTY (no input piped)
+    if io::stdin().is_terminal() {
+        print_help();
+        std::process::exit(1);
+    }
+
     // Read transaction from stdin
     let mut input = String::new();
     io::stdin()
@@ -44,13 +50,7 @@ async fn main() -> Result<()> {
 
     let input = input.trim();
     if input.is_empty() {
-        eprintln!("txsub - Submit transactions to the Stellar overlay network");
-        eprintln!();
-        eprintln!("Usage: echo <BASE64_TX> | txsub");
-        eprintln!();
-        eprintln!("Reads a base64-encoded transaction envelope from stdin,");
-        eprintln!("connects to the Stellar Testnet, and submits it via the");
-        eprintln!("peer-to-peer overlay protocol.");
+        print_help();
         std::process::exit(1);
     }
 
@@ -105,6 +105,17 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Print help/usage information.
+fn print_help() {
+    eprintln!("txsub - Submit transactions to the Stellar overlay network");
+    eprintln!();
+    eprintln!("Usage: echo <BASE64_TX> | txsub");
+    eprintln!();
+    eprintln!("Reads a base64-encoded transaction envelope from stdin,");
+    eprintln!("connects to the Stellar Testnet, and submits it via the");
+    eprintln!("peer-to-peer overlay protocol.");
 }
 
 /// Log an outgoing message.
