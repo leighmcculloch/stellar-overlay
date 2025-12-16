@@ -1,4 +1,4 @@
-.PHONY: build test test-integration install doc
+.PHONY: build test test-integration install doc readme
 
 build:
 	cargo build
@@ -14,3 +14,10 @@ install:
 
 doc:
 	cargo doc --no-deps --open
+
+readme:
+	cd stellar-overlay \
+		&& cargo +nightly rustdoc -- -Zunstable-options -wjson \
+		&& cat ../target/doc/stellar_overlay.json \
+		| jq -r '.index[.root|tostring].docs' \
+		> README.md

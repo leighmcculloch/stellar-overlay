@@ -2,6 +2,7 @@
 name = "stellar-overlay"
 version = "0.1.0"
 edition = "2021"
+readme = "README.md"
 
 [dependencies]
 stellar-xdr = { version = "25", features = ["std", "curr"] }
