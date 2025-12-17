@@ -8,10 +8,7 @@ Connects directly to stellar-core nodes, discovers peers recursively, and output
 
 ```
 $ stellar-peerinfo --network testnet
-Connecting to core-testnet1.stellar.org:11625 (depth 0)...
 {"type":"info","peer_id":"a1b2...","peer_address":"core-testnet1.stellar.org:11625","version":"v21.0.0","overlay_version":35,"ledger_version":21}
-Connecting to 34.123.45.67:11625 (depth 0)...
-{"type":"info","peer_id":"c3d4...","peer_address":"34.123.45.67:11625","version":"v21.0.0","overlay_version":35,"ledger_version":21}
 ```
 
 ## Output
@@ -95,5 +92,5 @@ stellar-peerinfo --timeout 30
 
 Filter results with jq:
 ```
-stellar-peerinfo 2>/dev/null | jq 'select(.type == "info")'
+stellar-peerinfo | jq 'select(.type == "info")'
 ```
