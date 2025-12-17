@@ -13,7 +13,7 @@ use std::collections::{HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
-use stellar_overlay::connect;
+use stellar_overlay::{connect, NodeIdentity};
 use stellar_xdr::curr::{PeerAddress, PeerAddressIp, PublicKey, StellarMessage};
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, Semaphore};
@@ -171,7 +171,8 @@ async fn get_peer_info(
         }
     };
 
-    let mut session = match connect(stream, network_id.clone()).await {
+    let node_identity = NodeIdentity::generate();
+    let mut session = match connect(node_identity, stream, network_id.clone()).await {
         Ok(s) => s,
         Err(e) => {
             return (

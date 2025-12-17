@@ -89,6 +89,7 @@ pub enum Error {
 ///
 /// # Arguments
 ///
+/// * `node_identity` - The local node identity (generate with [`NodeIdentity::generate`])
 /// * `stream` - A TCP connection to a Stellar Core node
 /// * `network_id` - The network ID (SHA-256 hash of the network passphrase)
 ///
@@ -103,29 +104,30 @@ pub enum Error {
 /// # Example
 ///
 /// ```no_run
-/// use stellar_overlay::{connect, PeerSession};
+/// use stellar_overlay::{connect, NodeIdentity, PeerSession};
 /// use stellar_xdr::curr::Hash;
 /// use tokio::net::TcpStream;
 ///
 /// async fn connect_to_testnet() -> Result<PeerSession, Box<dyn std::error::Error>> {
+///     let node_identity = NodeIdentity::generate();
 ///     let stream = TcpStream::connect("core-testnet1.stellar.org:11625").await?;
 ///     // Testnet network ID
 ///     let network_id = Hash(bytes_lit::bytes!(
 ///         0xcee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472
 ///     ));
 ///
-///     let session = connect(stream, network_id).await?;
+///     let session = connect(node_identity, stream, network_id).await?;
 ///     println!("Connected to peer: {:?}", session.peer_info().node_id);
 ///
 ///     Ok(session)
 /// }
 /// ```
 pub async fn connect(
+    node_identity: NodeIdentity,
     mut stream: TcpStream,
     network_id: Hash,
 ) -> Result<PeerSession, Error> {
-    // Generate crypto material
-    let node_identity = NodeIdentity::generate();
+    // Generate ECDH keypair for this connection
     let ecdh_keypair = EcdhKeypair::generate();
     let local_nonce = generate_nonce();
 
@@ -239,8 +241,9 @@ pub async fn connect(
     let recv_mac_key =
         derive_receiving_mac_key(&shared_key, &local_nonce, &peer_hello.nonce, true);
 
-    // Create session with MAC keys and peer info
-    let mut session = PeerSession::new(stream, send_mac_key, recv_mac_key, peer_info);
+    // Create session with local node ID, MAC keys, and peer info
+    let local_node_id = NodeId(node_identity.to_public_key());
+    let mut session = PeerSession::new(local_node_id, stream, send_mac_key, recv_mac_key, peer_info);
 
     // Send AUTH message
     let auth = Auth {

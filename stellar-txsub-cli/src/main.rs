@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::{self, IsTerminal, Read};
 use std::time::Duration;
-use stellar_overlay::connect;
+use stellar_overlay::{connect, NodeIdentity};
 use stellar_strkey::ed25519::PublicKey as StrkeyPublicKey;
 use stellar_xdr::curr::{
     GeneralizedTransactionSet, Hash, Limits, PublicKey, ReadXdr, ScpStatementPledges,
@@ -91,6 +91,12 @@ async fn main() -> Result<()> {
     // Resolve network
     let network = Network::from_str(&args.network);
     let peer = args.peer.as_deref().unwrap_or(network.default_peer());
+    let net_id = network.id();
+
+    // Generate local node identity
+    let node_identity = NodeIdentity::generate();
+    let local_g_address = public_key_to_g_address(&node_identity.to_public_key());
+    eprintln!("ℹ️ Local node ID: {}", local_g_address);
 
     // Connect to peer
     eprintln!("ℹ️ Connecting to {}", peer);
@@ -101,13 +107,12 @@ async fn main() -> Result<()> {
 
     // Perform handshake
     eprintln!("ℹ️ Performing handshake");
-    let net_id = network.id();
-    let mut session = connect(stream, net_id.clone()).await?;
+    let mut session = connect(node_identity, stream, net_id.clone()).await?;
 
     // Capture peer info for logging
     let peer_address = peer.to_string();
     let peer_g_address = public_key_to_g_address(&session.peer_info().node_id.0);
-    eprintln!("✅ Authenticated with peer {} ({})", peer_g_address, peer_address);
+    eprintln!("✅ Authenticated with {}", peer_g_address);
 
     // Request to receive messages from peer (flow control)
     // Without this, the peer won't send us SCP messages

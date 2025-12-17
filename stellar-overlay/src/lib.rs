@@ -64,5 +64,6 @@ mod framing;
 mod handshake;
 mod session;
 
+pub use crypto::NodeIdentity;
 pub use handshake::{connect, Error};
 pub use session::{PeerInfo, PeerSession};

@@ -12,8 +12,9 @@ use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519SecretKey
 
 /// Node identity using Ed25519 keypair.
 ///
-/// Used for signing protocol messages.
-pub(crate) struct NodeIdentity {
+/// Used for signing protocol messages. Generate with [`NodeIdentity::generate`]
+/// and pass to [`connect`](crate::connect) to establish a peer session.
+pub struct NodeIdentity {
     pub signing_key: SigningKey,
     pub public_key: VerifyingKey,
 }

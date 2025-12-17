@@ -60,6 +60,7 @@ pub enum Error {
 /// }
 /// ```
 pub struct PeerSession {
+    local_node_id: NodeId,
     stream: TcpStream,
     send_mac_key: HmacSha256Key,
     recv_mac_key: HmacSha256Key,
@@ -69,14 +70,16 @@ pub struct PeerSession {
 }
 
 impl PeerSession {
-    /// Create a new peer session with the given MAC keys and peer info.
+    /// Create a new peer session with the given local node ID, MAC keys, and peer info.
     pub(crate) fn new(
+        local_node_id: NodeId,
         stream: TcpStream,
         send_mac_key: HmacSha256Key,
         recv_mac_key: HmacSha256Key,
         peer_info: PeerInfo,
     ) -> Self {
         Self {
+            local_node_id,
             stream,
             send_mac_key,
             recv_mac_key,
@@ -84,6 +87,11 @@ impl PeerSession {
             recv_sequence: 0,
             peer_info,
         }
+    }
+
+    /// Get the local node ID (randomly generated for this session).
+    pub fn local_node_id(&self) -> &NodeId {
+        &self.local_node_id
     }
 
     /// Get information about the connected peer.
