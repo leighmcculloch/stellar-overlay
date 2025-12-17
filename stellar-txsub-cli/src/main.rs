@@ -8,15 +8,16 @@ mod network;
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use network::Network;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::io::{self, IsTerminal, Read};
 use std::time::Duration;
 use stellar_overlay::connect;
-use std::collections::HashMap;
-use sha2::{Digest, Sha256};
+use stellar_strkey::ed25519::PublicKey as StrkeyPublicKey;
 use stellar_xdr::curr::{
-    DontHave, GeneralizedTransactionSet, Hash, Limits, MessageType, ReadXdr, ScpStatementPledges,
-    SendMoreExtended, StellarMessage, StellarValue, TransactionEnvelope, TransactionPhase,
-    TxSetComponent, WriteXdr,
+    DontHave, GeneralizedTransactionSet, Hash, Limits, MessageType, PublicKey, ReadXdr,
+    ScpStatementPledges, SendMoreExtended, StellarMessage, StellarValue, TransactionEnvelope,
+    TransactionPhase, TxSetComponent, WriteXdr,
 };
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -102,7 +103,11 @@ async fn main() -> Result<()> {
     eprintln!("ℹ️ Performing handshake");
     let net_id = network.id();
     let mut session = connect(stream, net_id.clone()).await?;
-    eprintln!("✅ Authenticated");
+
+    // Capture peer info for logging
+    let peer_address = peer.to_string();
+    let peer_g_address = public_key_to_g_address(&session.peer_info().node_id.0);
+    eprintln!("✅ Authenticated with peer {} ({})", peer_g_address, peer_address);
 
     // Request to receive messages from peer (flow control)
     // Without this, the peer won't send us SCP messages
@@ -129,7 +134,7 @@ async fn main() -> Result<()> {
     loop {
         match timeout(response_timeout, session.recv()).await {
             Ok(Ok(msg)) => {
-                log_incoming(&msg);
+                log_incoming(&msg, &peer_address, &peer_g_address);
 
                 match &msg {
                     // Error messages are already logged by log_incoming, just continue
@@ -222,14 +227,24 @@ async fn main() -> Result<()> {
     std::process::exit(2)
 }
 
-/// Log an incoming message.
-fn log_incoming(msg: &StellarMessage) {
+/// Log an incoming message with source information.
+/// For SCP messages, shows the validator's node_id from the envelope.
+/// For other messages, shows the connected peer's address.
+fn log_incoming(msg: &StellarMessage, peer_address: &str, peer_g_address: &str) {
     let prefix = if matches!(msg, StellarMessage::ErrorMsg(_)) {
         "❌"
     } else {
         "⬅️"
     };
-    eprintln!("{} {}", prefix, format_message(msg));
+
+    // For SCP messages, show the validator who signed the message
+    let source = if let StellarMessage::ScpMessage(env) = msg {
+        public_key_to_g_address(&env.statement.node_id.0)
+    } else {
+        format!("{} ({})", peer_g_address, peer_address)
+    };
+
+    eprintln!("{} {} from {}", prefix, format_message(msg), source);
 }
 
 /// Format a StellarMessage for display.
@@ -281,6 +296,16 @@ fn hash_txset(txset: &GeneralizedTransactionSet) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(&xdr);
     hasher.finalize().into()
+}
+
+/// Convert a PublicKey to its Stellar G... string format.
+fn public_key_to_g_address(pk: &PublicKey) -> String {
+    match pk {
+        PublicKey::PublicKeyTypeEd25519(key) => {
+            let strkey = StrkeyPublicKey(key.0);
+            strkey.to_string()
+        }
+    }
 }
 
 /// Extract the transaction set hash from an externalize SCP message.
