@@ -11,7 +11,13 @@ use network::Network;
 use std::io::{self, IsTerminal, Read};
 use std::time::Duration;
 use stellar_overlay::connect;
-use stellar_xdr::curr::{ReadXdr, StellarMessage, TransactionEnvelope};
+use std::collections::HashMap;
+use sha2::{Digest, Sha256};
+use stellar_xdr::curr::{
+    DontHave, GeneralizedTransactionSet, Hash, Limits, MessageType, ReadXdr, ScpStatementPledges,
+    SendMoreExtended, StellarMessage, StellarValue, TransactionEnvelope, TransactionPhase,
+    TxSetComponent, WriteXdr,
+};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tracing::level_filters::LevelFilter;
@@ -34,8 +40,8 @@ struct Args {
     #[arg(short, long, default_value = "testnet")]
     network: String,
 
-    /// Timeout in seconds for waiting for responses
-    #[arg(short, long, default_value = "5")]
+    /// Timeout in seconds for waiting for confirmation
+    #[arg(short, long, default_value = "30")]
     timeout: u64,
 }
 
@@ -98,21 +104,106 @@ async fn main() -> Result<()> {
     let mut session = connect(stream, net_id.clone()).await?;
     eprintln!("✅ Authenticated");
 
+    // Request to receive messages from peer (flow control)
+    // Without this, the peer won't send us SCP messages
+    eprintln!("➡️ SendMoreExtended: num_messages=1000, num_bytes=10000000");
+    let send_more = StellarMessage::SendMoreExtended(SendMoreExtended {
+        num_messages: 1000,
+        num_bytes: 10_000_000,
+    });
+    session.send_message(send_more).await?;
+
     // Send transaction
     let tx_hash = tx_envelope.hash(net_id.0).expect("Failed to hash transaction");
     eprintln!("➡️ Transaction: hash={}", hex::encode(tx_hash));
     let tx_msg = StellarMessage::Transaction(tx_envelope);
     session.send_message(tx_msg).await?;
 
-    // Wait for responses with timeout
+    // Wait for confirmation with timeout
+    // Track which txset hashes we've already requested to avoid duplicates
     let response_timeout = Duration::from_secs(args.timeout);
+    let mut requested_txsets: HashMap<[u8; 32], u64> = HashMap::new();
+
+    eprintln!("ℹ️ Waiting for confirmation (timeout={}s)...", args.timeout);
+
     loop {
         match timeout(response_timeout, session.recv()).await {
             Ok(Ok(msg)) => {
                 log_incoming(&msg);
-                // If we got an error, exit with failure
-                if matches!(msg, StellarMessage::ErrorMsg(_)) {
-                    std::process::exit(1);
+
+                match &msg {
+                    // Error messages are already logged by log_incoming, just continue
+                    StellarMessage::ErrorMsg(_) => {}
+
+                    // Handle SCP messages - look for externalize to get txset hash
+                    StellarMessage::ScpMessage(_) => {
+                        if let Some((ledger_seq, txset_hash)) = extract_txset_hash_from_scp_message(&msg) {
+                            // Only request each txset once
+                            if !requested_txsets.contains_key(&txset_hash.0) {
+                                requested_txsets.insert(txset_hash.0, ledger_seq);
+                                eprintln!("➡️ GetTxSet: ledger={}, hash={}", ledger_seq, hex::encode(txset_hash.0));
+                                let get_txset_msg = StellarMessage::GetTxSet(txset_hash.0.into());
+                                if let Err(e) = session.send_message(get_txset_msg).await {
+                                    eprintln!("❌ Failed to request txset: {}", e);
+                                }
+                            }
+                        }
+                    }
+
+                    // Handle GeneralizedTxSet - check if our transaction is included
+                    StellarMessage::GeneralizedTxSet(txset) => {
+                        if txset_contains_tx(txset, &tx_hash, &net_id) {
+                            // Look up which ledger this txset belongs to
+                            let txset_hash = hash_txset(txset);
+                            if let Some(&ledger_seq) = requested_txsets.get(&txset_hash) {
+                                eprintln!("✅ Transaction found in ledger {}", ledger_seq);
+                            } else {
+                                eprintln!("✅ Transaction found in ledger");
+                            }
+                            return Ok(());
+                        }
+                    }
+
+                    // Handle legacy TxSet for older protocol versions
+                    StellarMessage::TxSet(txset) => {
+                        // Check if our transaction is in the legacy txset
+                        for tx in txset.txs.iter() {
+                            if let Ok(hash) = tx.hash(net_id.0) {
+                                if hash == tx_hash {
+                                    eprintln!("✅ Transaction found in ledger");
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+
+                    // Respond to peer requests with DontHave (we're a lightweight client)
+                    StellarMessage::GetScpState(_) => {
+                        // We don't have SCP state to share - just ignore
+                        // (responding here might cause issues as peer expects specific format)
+                    }
+                    StellarMessage::GetScpQuorumset(hash) => {
+                        // Respond with DontHave
+                        eprintln!("➡️ DontHave: ScpQuorumset");
+                        let dont_have = StellarMessage::DontHave(DontHave {
+                            type_: MessageType::ScpQuorumset,
+                            req_hash: hash.clone(),
+                        });
+                        let _ = session.send_message(dont_have).await;
+                    }
+
+                    // Replenish flow control when peer sends us flow control messages
+                    StellarMessage::SendMore(_) | StellarMessage::SendMoreExtended(_) => {
+                        // Peer is indicating flow control - send our own to keep receiving
+                        eprintln!("➡️ SendMoreExtended: num_messages=1000, num_bytes=10000000");
+                        let send_more = StellarMessage::SendMoreExtended(SendMoreExtended {
+                            num_messages: 1000,
+                            num_bytes: 10_000_000,
+                        });
+                        let _ = session.send_message(send_more).await;
+                    }
+
+                    _ => {}
                 }
             }
             Ok(Err(e)) => {
@@ -120,16 +211,15 @@ async fn main() -> Result<()> {
                 break;
             }
             Err(_) => {
-                eprintln!("ℹ️ Done (timeout)");
+                eprintln!("ℹ️ Timeout reached ({}s)", args.timeout);
                 break;
             }
         }
     }
 
-    eprintln!("⚠️ This tool does not confirm if the transaction was successful.");
-    eprintln!("⚠️ Use the hash to check the status with a block explorer.");
-
-    Ok(())
+    eprintln!("⚠️ Transaction was not found in a ledger within the timeout period.");
+    eprintln!("⚠️ Use the hash to check the status: {}", hex::encode(tx_hash));
+    std::process::exit(2)
 }
 
 /// Log an incoming message.
@@ -164,8 +254,110 @@ fn format_message(msg: &StellarMessage) -> String {
             )
         }
         StellarMessage::Peers(peers) => format!("{}: count={}", msg.name(), peers.len()),
+        StellarMessage::ScpMessage(env) => {
+            let slot = env.statement.slot_index;
+            let pledge_type = match &env.statement.pledges {
+                ScpStatementPledges::Prepare(_) => "Prepare",
+                ScpStatementPledges::Confirm(_) => "Confirm",
+                ScpStatementPledges::Externalize(_) => "Externalize",
+                ScpStatementPledges::Nominate(_) => "Nominate",
+            };
+            format!("{}: slot={}, type={}", msg.name(), slot, pledge_type)
+        }
+        StellarMessage::GeneralizedTxSet(txset) => {
+            let tx_count = count_transactions_in_txset(txset);
+            format!("{}: tx_count={}", msg.name(), tx_count)
+        }
+        StellarMessage::DontHave(dh) => {
+            format!("{}: type={:?}", msg.name(), dh.type_)
+        }
         _ => msg.name().to_string(),
     }
+}
+
+/// Compute the SHA256 hash of a GeneralizedTransactionSet.
+fn hash_txset(txset: &GeneralizedTransactionSet) -> [u8; 32] {
+    let xdr = txset.to_xdr(Limits::none()).expect("Failed to encode txset");
+    let mut hasher = Sha256::new();
+    hasher.update(&xdr);
+    hasher.finalize().into()
+}
+
+/// Extract the transaction set hash from an externalize SCP message.
+/// Returns None if the message is not an externalize or if parsing fails.
+fn extract_txset_hash_from_scp_message(msg: &StellarMessage) -> Option<(u64, Hash)> {
+    let env = match msg {
+        StellarMessage::ScpMessage(env) => env,
+        _ => return None,
+    };
+
+    let externalize = match &env.statement.pledges {
+        ScpStatementPledges::Externalize(ext) => ext,
+        _ => return None,
+    };
+
+    // The commit.value contains XDR-encoded StellarValue
+    let stellar_value = StellarValue::from_xdr(&externalize.commit.value, Limits::none()).ok()?;
+
+    Some((env.statement.slot_index, stellar_value.tx_set_hash))
+}
+
+/// Count total transactions in a GeneralizedTransactionSet
+fn count_transactions_in_txset(txset: &GeneralizedTransactionSet) -> usize {
+    let GeneralizedTransactionSet::V1(v1) = txset;
+    v1.phases
+        .iter()
+        .map(|phase| match phase {
+            TransactionPhase::V0(components) => components
+                .iter()
+                .map(|c| match c {
+                    TxSetComponent::TxsetCompTxsMaybeDiscountedFee(comp) => comp.txs.len(),
+                })
+                .sum::<usize>(),
+            TransactionPhase::V1(parallel) => parallel
+                .execution_stages
+                .iter()
+                .flat_map(|stage| stage.iter())
+                .map(|cluster| cluster.0.len())
+                .sum(),
+        })
+        .sum()
+}
+
+/// Check if a transaction set contains the given transaction hash.
+fn txset_contains_tx(txset: &GeneralizedTransactionSet, tx_hash: &[u8; 32], network_id: &Hash) -> bool {
+    let GeneralizedTransactionSet::V1(v1) = txset;
+    for phase in v1.phases.iter() {
+        match phase {
+            TransactionPhase::V0(components) => {
+                for component in components.iter() {
+                    let TxSetComponent::TxsetCompTxsMaybeDiscountedFee(comp) = component;
+                    for tx in comp.txs.iter() {
+                        if let Ok(hash) = tx.hash(network_id.0) {
+                            if hash == *tx_hash {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            TransactionPhase::V1(parallel) => {
+                for stage in parallel.execution_stages.iter() {
+                    // Each stage is a DependentTxCluster which contains a VecM<TransactionEnvelope>
+                    for cluster in stage.iter() {
+                        for tx in cluster.0.iter() {
+                            if let Ok(hash) = tx.hash(network_id.0) {
+                                if hash == *tx_hash {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Custom event formatter for tracing output.
